@@ -13,4 +13,14 @@ venv/
 .idea/
 .vscode/
 
+# Claude Code / MCP
+.claude/
+.mcp.json
+
+# Playwright CLI
+.playwright-cli/
+
+# Egg info
+*.egg-info/
+
 
