@@ -1,0 +1,17 @@
+[project]
+name = "art-finder"
+version = "0.2.0"
+description = "A Streamlit app to review and download artworks from museum APIs"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "streamlit>=1.28.0",
+    "requests>=2.31.0",
+    "pillow>=10.0.0",
+]
+
+[project.scripts]
+art-finder = "app:main"
+
+[tool.setuptools.packages.find]
+include = ["art_finder*"]
