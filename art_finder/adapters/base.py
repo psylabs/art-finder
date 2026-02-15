@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Any
 from typing import Callable
 import requests
 
@@ -91,6 +92,9 @@ class MuseumAdapter(ABC):
             msg = f"Unexpected error from {self.name}."
             result.errors.append(msg)
             self._log_error(f"Unexpected error: {type(e).__name__}: {e}")
+
+        if self.short_name not in result.source_counts:
+            result.source_counts[self.short_name] = len(result.artworks)
         
         return result
     
@@ -137,6 +141,38 @@ class MuseumAdapter(ABC):
         if min_height and height and height < min_height:
             return False
         return True
+
+    @staticmethod
+    def normalize_text(value: Any) -> str:
+        """Normalize scalar/list values to a clean display string."""
+        if value is None:
+            return ""
+        if isinstance(value, (list, tuple, set)):
+            parts = [str(item).strip() for item in value if str(item).strip()]
+            return ", ".join(parts)
+        return str(value).strip()
+
+    @classmethod
+    def normalize_place_of_origin(cls, value: Any, fallback: Any = "") -> str:
+        """Normalize place-of-origin data with a fallback value."""
+        normalized = cls.normalize_text(value)
+        if normalized:
+            return normalized
+        return cls.normalize_text(fallback)
+
+    @staticmethod
+    def contains_case_insensitive(value: str, query: str) -> bool:
+        """Case-insensitive substring match helper."""
+        if not query:
+            return True
+        return query.lower() in value.lower()
+
+    @staticmethod
+    def default_rights_label(is_downloadable: bool) -> str:
+        """Return a source-agnostic rights label when APIs do not provide one."""
+        if is_downloadable:
+            return "Open access image"
+        return "Rights status unknown"
     
     @staticmethod
     def create_filename(title: str, artwork_id: str, museum_abbrev: str) -> str:

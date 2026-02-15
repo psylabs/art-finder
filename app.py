@@ -1,21 +1,50 @@
-"""Open Access Art Finder - Streamlit application."""
+"""Art Findr - Streamlit application."""
 
-import streamlit as st
+from datetime import date, datetime
+import html
 import requests
-from datetime import datetime
+import streamlit as st
 
-from art_finder.adapters import get_adapter, get_adapter_names
+from art_finder.adapters import get_adapter_names
 from art_finder.models import SearchFilters, AdapterResult
-from art_finder.mappings import get_canonical_departments
+from art_finder.mappings import get_canonical_genres, get_canonical_media
+from art_finder.services import search as search_aggregated
 
 # Configuration
 FETCH_TIMEOUT = 30
 IMAGE_TIMEOUT = 30
-DEFAULT_FETCH_LIMIT = 100
-FETCH_LIMIT_OPTIONS = [100, 200, 500, 1000]
-ALL_DEPARTMENTS_LABEL = "All departments"
+DEFAULT_FETCH_LIMIT = 50
+FETCH_LIMIT_OPTIONS = [50, 100, 200, 500, 1000]
+ALL_GENRES_LABEL = "All genres"
+ALL_MEDIA_LABEL = "All media"
 
-st.set_page_config(page_title="Open Access Art Finder", layout="wide")
+st.set_page_config(page_title="Art Findr", layout="wide")
+
+st.markdown(
+    """
+<style>
+.art-image-frame {
+    width: 100%;
+    height: 68vh;
+    min-height: 420px;
+    max-height: 760px;
+    border: 1px solid rgba(49, 51, 63, 0.2);
+    border-radius: 12px;
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+.art-image-frame img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+</style>
+""",
+    unsafe_allow_html=True,
+)
 
 
 # =============================================================================
@@ -31,27 +60,29 @@ def init_session_state():
         "debug_logs": [],
         "last_result": None,  # Store AdapterResult for filter feedback
         # Filters
-        "source": "CMA",
-        "source_last": "CMA",
+        "selected_sources": ["CMA", "AIC"],
+        "selected_sources_last": ["CMA", "AIC"],
         "orientation_filter": "Portrait",
         "orientation_filter_last": "Portrait",
-        "department_filter": ALL_DEPARTMENTS_LABEL,
-        "department_filter_last": ALL_DEPARTMENTS_LABEL,
+        "department_filter": ALL_GENRES_LABEL,
+        "department_filter_last": ALL_GENRES_LABEL,
+        "medium_filter": ALL_MEDIA_LABEL,
+        "medium_filter_last": ALL_MEDIA_LABEL,
+        "place_origin_filter": "",
+        "place_origin_filter_last": "",
         "fetch_limit": DEFAULT_FETCH_LIMIT,
         "fetch_limit_last": DEFAULT_FETCH_LIMIT,
+        "use_random_seed": False,
+        "use_random_seed_last": False,
+        "random_seed_value": 42,
+        "random_seed_value_last": 42,
         # New filters
         "year_from": None,
         "year_from_last": None,
         "year_to": None,
         "year_to_last": None,
-        "min_width": None,
-        "min_width_last": None,
-        "min_height": None,
-        "min_height_last": None,
-        # AIC-specific
-        "aic_search_term": "portrait",
-        "aic_search_term_last": "portrait",
-        "aic_departments": [],
+        "search_term": "",
+        "search_term_last": "",
         # Options
         "ssl_bypass": False,
         "ssl_bypass_last": False,
@@ -110,32 +141,42 @@ def reset_loaded_state(reason: str):
 def check_filter_changes():
     """Check if any filters changed and reset state if needed."""
     changes = []
-    
-    # Check each filter
+
+    selected_sources = list(st.session_state.selected_sources)
+    sources_last = list(st.session_state.selected_sources_last)
+    if sorted(selected_sources) != sorted(sources_last):
+        changes.append("API selection changed")
+        st.session_state.selected_sources_last = selected_sources
+        st.session_state.department_filter = ALL_GENRES_LABEL
+
+    # Check scalar filters.
     filter_checks = [
-        ("source", "source changed"),
         ("orientation_filter", "orientation changed"),
         ("department_filter", "department changed"),
+        ("medium_filter", "medium changed"),
+        ("place_origin_filter", "place of origin changed"),
         ("fetch_limit", "fetch limit changed"),
         ("year_from", "year range changed"),
         ("year_to", "year range changed"),
-        ("min_width", "resolution changed"),
-        ("min_height", "resolution changed"),
-        ("aic_search_term", "search term changed"),
         ("ssl_bypass", "SSL bypass changed"),
+        ("use_random_seed", "seed mode changed"),
     ]
-    
+
     for key, reason in filter_checks:
         last_key = f"{key}_last"
         if st.session_state.get(key) != st.session_state.get(last_key):
             changes.append(reason)
             st.session_state[last_key] = st.session_state[key]
-    
-    # Special handling for source change - reset department
-    if "source changed" in changes:
-        st.session_state.department_filter = ALL_DEPARTMENTS_LABEL
-        st.session_state.aic_departments = []
-    
+
+    if st.session_state.use_random_seed:
+        if st.session_state.random_seed_value != st.session_state.random_seed_value_last:
+            changes.append("seed value changed")
+            st.session_state.random_seed_value_last = st.session_state.random_seed_value
+
+    if st.session_state.search_term != st.session_state.search_term_last:
+        changes.append("search term changed")
+        st.session_state.search_term_last = st.session_state.search_term
+
     # Reset if any changes
     if changes:
         # Deduplicate reasons
@@ -148,38 +189,39 @@ def check_filter_changes():
 # =============================================================================
 
 def fetch_artworks() -> AdapterResult:
-    """Fetch artworks using the selected adapter."""
-    source = st.session_state.source
-    adapter = get_adapter(source)
-    adapter.set_logger(adapter_log_callback)
-    
+    """Fetch artworks using the selected APIs and merge results."""
+    selected_sources = list(st.session_state.selected_sources)
+    query = st.session_state.search_term.strip() or None
+    random_seed = (
+        st.session_state.random_seed_value if st.session_state.use_random_seed else None
+    )
+
     # Build filters
     filters = SearchFilters(
-        query=st.session_state.aic_search_term if source == "AIC" else None,
+        sources=selected_sources,
+        query=query,
         year_from=st.session_state.year_from,
         year_to=st.session_state.year_to,
         department=(
-            None if st.session_state.department_filter == ALL_DEPARTMENTS_LABEL 
+            None if st.session_state.department_filter == ALL_GENRES_LABEL
             else st.session_state.department_filter
         ),
+        medium=(
+            None if st.session_state.medium_filter == ALL_MEDIA_LABEL
+            else st.session_state.medium_filter
+        ),
+        place_of_origin=st.session_state.place_origin_filter.strip() or None,
         orientation=st.session_state.orientation_filter,
-        min_width=st.session_state.min_width,
-        min_height=st.session_state.min_height,
         has_image=True,
         limit=st.session_state.fetch_limit,
+        random_seed=random_seed,
         ssl_bypass=st.session_state.ssl_bypass,
     )
-    
-    log_event(f"Fetching from {adapter.name}...")
-    
+
+    log_event(f"Fetching from sources: {', '.join(selected_sources)}")
+
     # Execute search
-    result = adapter.search(filters)
-    
-    # Update discovered departments for AIC
-    if source == "AIC":
-        st.session_state.aic_departments = adapter.get_departments()
-    
-    return result
+    return search_aggregated(filters, log_callback=adapter_log_callback)
 
 
 def download_high_res(image_url: str) -> bytes | None:
@@ -212,6 +254,8 @@ def render_filter_feedback(result: AdapterResult):
     if status.applied:
         with st.expander("✓ Filters Applied", expanded=False):
             for name, desc in status.applied.items():
+                if "random_seed" in name:
+                    continue
                 st.caption(f"• {desc}")
     
     # Show skipped filters (warnings)
@@ -225,6 +269,13 @@ def render_filter_feedback(result: AdapterResult):
         for warning in result.warnings:
             st.warning(warning)
 
+    if result.source_counts:
+        with st.expander("Source Counts", expanded=False):
+            adapter_names = get_adapter_names()
+            for source, count in result.source_counts.items():
+                source_label = adapter_names.get(source, source)
+                st.caption(f"{source_label}: {count} artworks")
+
 
 def render_errors(result: AdapterResult):
     """Render any errors from the adapter."""
@@ -236,133 +287,148 @@ def render_errors(result: AdapterResult):
 
 
 def get_department_options() -> list[str]:
-    """Get department options based on current source."""
-    # Use canonical departments for unified UI
-    canonical = get_canonical_departments()
-    
-    # Also include source-specific departments for backward compatibility
-    if st.session_state.source == "AIC":
-        # Add any discovered AIC departments not in canonical
-        aic_depts = st.session_state.aic_departments
-        if aic_depts:
-            all_depts = set(canonical) | set(aic_depts)
-            return [ALL_DEPARTMENTS_LABEL] + sorted(all_depts)
-        return [ALL_DEPARTMENTS_LABEL] + canonical
-    else:
-        # CMA - use canonical plus CMA-specific
-        adapter = get_adapter("CMA")
-        cma_depts = adapter.get_departments()
-        all_depts = set(canonical) | set(cma_depts)
-        return [ALL_DEPARTMENTS_LABEL] + sorted(all_depts)
+    """Get canonical genre options shared across selected APIs."""
+    return [ALL_GENRES_LABEL] + get_canonical_genres()
+
+
+def get_medium_options() -> list[str]:
+    """Get canonical medium options shared across selected APIs."""
+    return [ALL_MEDIA_LABEL] + get_canonical_media()
 
 
 def render_sidebar():
     """Render the sidebar with filters and debug console."""
     with st.sidebar:
         st.subheader("Filters")
-        
-        # Source selector
+
         adapter_names = get_adapter_names()
         source_options = list(adapter_names.keys())
-        source_labels = [adapter_names[k] for k in source_options]
-        
-        current_idx = source_options.index(st.session_state.source) if st.session_state.source in source_options else 0
-        selected_label = st.selectbox(
-            "Source",
-            source_labels,
-            index=current_idx,
+
+        selected_sources: list[str] = []
+        with st.expander("Museum", expanded=False):
+            for source in source_options:
+                key = f"source_enabled_{source}"
+                if key not in st.session_state:
+                    st.session_state[key] = source in st.session_state.selected_sources
+                checked = st.checkbox(f"{adapter_names[source]} ({source})", key=key)
+                if checked:
+                    selected_sources.append(source)
+
+        if not selected_sources and source_options:
+            fallback = source_options[0]
+            st.session_state[f"source_enabled_{fallback}"] = True
+            selected_sources = [fallback]
+            st.warning("At least one museum must be selected.")
+        st.session_state.selected_sources = selected_sources
+
+        # Genre (first)
+        dept_options = get_department_options()
+        if st.session_state.department_filter not in dept_options:
+            st.session_state.department_filter = ALL_GENRES_LABEL
+
+        st.selectbox(
+            "Genre",
+            dept_options,
+            key="department_filter",
+            help=(
+                "Canonical genres are normalized across museums. "
+                "Each museum's native departments map to these shared options."
+            ),
         )
-        st.session_state.source = source_options[source_labels.index(selected_label)]
-        
-        # Search term (AIC only)
-        if st.session_state.source == "AIC":
-            st.text_input(
-                "Search term",
-                value=st.session_state.aic_search_term,
-                key="aic_search_term",
-                help="Search term for Art Institute of Chicago"
-            )
-        
+
+        # Medium (second)
+        medium_options = get_medium_options()
+        if st.session_state.medium_filter not in medium_options:
+            st.session_state.medium_filter = ALL_MEDIA_LABEL
+        st.selectbox(
+            "Medium",
+            medium_options,
+            key="medium_filter",
+            help="Client-side medium normalization using each source's medium/classification fields.",
+        )
+
+        # Place of origin (third)
+        st.text_input(
+            "Place of origin contains",
+            value=st.session_state.place_origin_filter,
+            key="place_origin_filter",
+            help="Substring match across normalized place-of-origin values.",
+        )
+
+        st.text_input(
+            "Search term",
+            value=st.session_state.search_term,
+            key="search_term",
+            help="Applied across all selected museums.",
+        )
+
         # Orientation
         st.selectbox(
             "Orientation",
-            ["Portrait", "Landscape"],
+            ["Any", "Portrait", "Landscape"],
             key="orientation_filter"
         )
-        
-        # Department
-        dept_options = get_department_options()
-        if st.session_state.department_filter not in dept_options:
-            st.session_state.department_filter = ALL_DEPARTMENTS_LABEL
-        
-        st.selectbox(
-            "Department",
-            dept_options,
-            key="department_filter",
-            help="Filter by curatorial department"
-        )
-        
+
         # Year range
-        st.markdown("**Year Range**")
+        st.markdown("**Date Range**")
         col1, col2 = st.columns(2)
-        with col1:
-            year_from = st.number_input(
-                "From",
-                min_value=-3000,
-                max_value=2030,
-                value=st.session_state.year_from,
-                placeholder="Any",
-                help="Earliest year (e.g., 1850)",
-            )
-            st.session_state.year_from = year_from if year_from else None
-        with col2:
-            year_to = st.number_input(
-                "To",
-                min_value=-3000,
-                max_value=2030,
-                value=st.session_state.year_to,
-                placeholder="Any",
-                help="Latest year (e.g., 1950)",
-            )
-            st.session_state.year_to = year_to if year_to else None
-        
-        # Resolution filter
-        st.markdown("**Minimum Resolution**")
-        col1, col2 = st.columns(2)
-        with col1:
-            min_w = st.number_input(
-                "Width",
-                min_value=0,
-                max_value=10000,
-                value=st.session_state.min_width or 0,
-                help="Minimum width in pixels",
-            )
-            st.session_state.min_width = min_w if min_w > 0 else None
-        with col2:
-            min_h = st.number_input(
-                "Height",
-                min_value=0,
-                max_value=10000,
-                value=st.session_state.min_height or 0,
-                help="Minimum height in pixels",
-            )
-            st.session_state.min_height = min_h if min_h > 0 else None
-        
-        # Fetch limit
-        st.selectbox(
-            "Fetch limit",
-            FETCH_LIMIT_OPTIONS,
-            key="fetch_limit"
+        year_from_default = (
+            date(st.session_state.year_from, 1, 1)
+            if st.session_state.year_from
+            else None
         )
-        
+        year_to_default = (
+            date(st.session_state.year_to, 12, 31)
+            if st.session_state.year_to
+            else None
+        )
+        with col1:
+            from_date = st.date_input(
+                "From date",
+                value=year_from_default,
+                key="year_from_date",
+                help="Earliest creation date (year is used for filtering).",
+                format="YYYY-MM-DD",
+            )
+            st.session_state.year_from = from_date.year if from_date else None
+        with col2:
+            to_date = st.date_input(
+                "To date",
+                value=year_to_default,
+                key="year_to_date",
+                help="Latest creation date (year is used for filtering).",
+                format="YYYY-MM-DD",
+            )
+            st.session_state.year_to = to_date.year if to_date else None
+
         st.caption("Filters apply when you click Load Artworks.")
-        
-        # SSL bypass option
-        st.checkbox("Bypass SSL verification", key="ssl_bypass", help="Use if you encounter SSL errors")
-        
-        # Debug console
-        with st.expander("Debug Console", expanded=False):
-            if st.button("Clear Logs"):
+
+        with st.expander("Advanced", expanded=False):
+            st.selectbox(
+                "Fetch limit",
+                FETCH_LIMIT_OPTIONS,
+                key="fetch_limit"
+            )
+
+            st.checkbox(
+                "Bypass SSL verification",
+                key="ssl_bypass",
+                help="Use if you encounter SSL errors",
+            )
+
+            st.checkbox("Use deterministic seed", key="use_random_seed")
+            if st.session_state.use_random_seed:
+                st.number_input(
+                    "Seed",
+                    min_value=0,
+                    max_value=2_147_483_646,
+                    step=1,
+                    key="random_seed_value",
+                    help="Same seed + same filters = same artwork order.",
+                )
+
+            st.markdown("**Debug Console**")
+            if st.button("Clear Logs", key="clear_logs"):
                 st.session_state.debug_logs = []
             log_text = "\n".join(st.session_state.debug_logs) if st.session_state.debug_logs else "No logs yet."
             st.code(log_text, language=None)
@@ -372,24 +438,33 @@ def render_artwork_display(artwork: dict):
     """Render the current artwork display."""
     idx = st.session_state.current_idx
     total = len(st.session_state.images)
-    
+
     # Progress
     st.caption(f"Image {idx + 1} of {total}")
-    
+
     # Layout: image + metadata side-by-side
     col_image, col_meta = st.columns([3, 2], gap="large")
-    
+
     with col_image:
-        st.image(artwork["image_url"], use_container_width=True)
-    
+        image_url = html.escape(str(artwork.get("image_url", "")), quote=True)
+        image_title = html.escape(str(artwork.get("title", "Artwork")), quote=True)
+        st.markdown(
+            f"""
+            <div class="art-image-frame">
+                <img src="{image_url}" alt="{image_title}">
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
     with col_meta:
         st.subheader(artwork["title"])
-        
+
         # Source label
         adapter_names = get_adapter_names()
         source_name = adapter_names.get(artwork.get("source", ""), artwork.get("source", "Unknown"))
         st.caption(f"Source: {source_name}")
-        
+
         # Metadata grid
         meta_left, meta_right = st.columns(2)
         metadata_fields = [
@@ -400,9 +475,15 @@ def render_artwork_display(artwork: dict):
             ("Medium", artwork.get("medium")),
             ("Credit", artwork.get("credit")),
             ("Culture", artwork.get("culture")),
+            ("Place of origin", artwork.get("place_of_origin")),
+            (
+                "Downloadable",
+                "Yes" if artwork.get("is_downloadable", True) else "No",
+            ),
+            ("Rights", artwork.get("rights_label")),
             ("Accession #", artwork.get("accession_number")),
         ]
-        
+
         for index, (label, value) in enumerate(metadata_fields):
             if not value:
                 continue
@@ -410,38 +491,41 @@ def render_artwork_display(artwork: dict):
                 value = ", ".join([str(v) for v in value if v])
             target_col = meta_left if index % 2 == 0 else meta_right
             target_col.write(f"**{label}:** {value}")
-        
+
         # Actions
         st.markdown("**Actions**")
         col_back, col_skip, col_download = st.columns(3)
-        
+
         with col_back:
             if st.button("⬅️ Back", type="secondary", disabled=(idx == 0)):
                 st.session_state.current_idx -= 1
                 st.rerun()
-        
+
         with col_skip:
             if st.button("⏭️ Skip", type="secondary"):
                 st.session_state.current_idx += 1
                 st.rerun()
-        
+
         with col_download:
-            img_data = download_high_res(artwork["image_url"])
-            if img_data:
-                download_clicked = st.download_button(
-                    label="⬇️ Download",
-                    data=img_data,
-                    file_name=artwork.get("filename", "artwork.jpg"),
-                    mime="image/jpeg",
-                    type="primary",
-                )
-                if download_clicked:
-                    log_event(f"Downloaded: {artwork.get('id')}")
-                    st.session_state.current_idx += 1
-                    st.rerun()
+            if artwork.get("is_downloadable", True):
+                img_data = download_high_res(artwork["image_url"])
+                if img_data:
+                    download_clicked = st.download_button(
+                        label="⬇️ Download",
+                        data=img_data,
+                        file_name=artwork.get("filename", "artwork.jpg"),
+                        mime="image/jpeg",
+                        type="primary",
+                    )
+                    if download_clicked:
+                        log_event(f"Downloaded: {artwork.get('id')}")
+                        st.session_state.current_idx += 1
+                        st.rerun()
+                else:
+                    st.button("⬇️ Download", type="primary", disabled=True)
             else:
                 st.button("⬇️ Download", type="primary", disabled=True)
-        
+
         # Extended metadata
         metadata = artwork.get("metadata", {})
         if metadata.get("tombstone"):
@@ -452,6 +536,25 @@ def render_artwork_display(artwork: dict):
             st.text_area("Did you know", value=metadata["did_you_know"], height=60, disabled=True)
 
 
+def render_source_links(selected_sources: list[str]) -> None:
+    """Render selected museum API links."""
+    adapter_names = get_adapter_names()
+    source_links = {
+        "AIC": "https://api.artic.edu/api/v1/artworks/search",
+        "CMA": "https://openaccess-api.clevelandart.org/api/artworks",
+    }
+    links: list[str] = []
+    for source in selected_sources:
+        label = adapter_names.get(source, source)
+        url = source_links.get(source)
+        if url:
+            links.append(f"[{label}]({url})")
+        else:
+            links.append(label)
+    if links:
+        st.caption("Museums: " + " | ".join(links))
+
+
 # =============================================================================
 # Main Application
 # =============================================================================
@@ -460,34 +563,31 @@ def main():
     """Main application entry point."""
     # Check for filter changes
     check_filter_changes()
-    
+
     # Render sidebar
     render_sidebar()
-    
+
     # Main content
-    st.markdown("### Open Access Art Finder")
-    
-    # Show source link
+    st.title("Art Findr")
+    selected_sources = list(st.session_state.selected_sources)
     adapter_names = get_adapter_names()
-    source_name = adapter_names.get(st.session_state.source, st.session_state.source)
-    if st.session_state.source == "AIC":
-        st.caption(f"[{source_name} API](https://api.artic.edu/api/v1/artworks/search)")
-    else:
-        st.caption(f"[{source_name} Open Access API](https://openaccess-api.clevelandart.org/api/artworks)")
-    
+    selected_source_names = [adapter_names.get(source, source) for source in selected_sources]
+    selected_source_label = ", ".join(selected_source_names)
+    render_source_links(selected_sources)
+
     # Not loaded state
     if not st.session_state.loaded:
         # Show filter feedback from last result if available
         if st.session_state.last_result:
             render_filter_feedback(st.session_state.last_result)
             render_errors(st.session_state.last_result)
-        
+
         if st.button("Load Artworks", type="primary"):
             log_event("Load button clicked")
-            with st.spinner(f"Fetching artworks from {source_name}..."):
+            with st.spinner(f"Fetching artworks from {selected_source_label}..."):
                 result = fetch_artworks()
                 st.session_state.last_result = result
-                
+
                 if result.artworks:
                     # Convert to dicts for session state storage
                     st.session_state.images = [a.to_dict() for a in result.artworks]
@@ -499,15 +599,17 @@ def main():
                     render_filter_feedback(result)
                     if not result.errors:
                         st.warning("No artworks found matching your filters. Try adjusting the filters.")
-        
+
         st.caption("Choose filters in the sidebar, then click Load Artworks.")
-        st.caption(f"Will fetch up to {st.session_state.fetch_limit} artworks from {source_name}")
+        st.caption(
+            f"Will fetch up to {st.session_state.fetch_limit} artworks across {len(selected_sources)} museums."
+        )
         st.stop()
-    
+
     # Show filter feedback
     if st.session_state.last_result:
         render_filter_feedback(st.session_state.last_result)
-    
+
     # No images found
     if not st.session_state.images:
         st.warning("No artworks found. Try adjusting your filters.")
@@ -516,7 +618,7 @@ def main():
             st.session_state.loaded = False
             st.rerun()
         st.stop()
-    
+
     # All images reviewed
     idx = st.session_state.current_idx
     if idx >= len(st.session_state.images):
@@ -525,7 +627,7 @@ def main():
             st.session_state.current_idx = 0
             st.rerun()
         st.stop()
-    
+
     # Display current artwork
     artwork = st.session_state.images[idx]
     render_artwork_display(artwork)

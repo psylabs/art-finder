@@ -1,37 +1,41 @@
-"""Department mapping between museums.
+"""Canonical genre and department mappings between museums.
 
-This module provides bidirectional mapping between canonical department names
-(shown in the UI) and museum-specific department names (used in API queries).
-
-When adding a new museum, add its mappings to DEPARTMENT_MAP using the
-museum's short_name in lowercase as the key.
+This module maps canonical UI genres to museum-specific department values
+used by source APIs.
 """
 
 from __future__ import annotations
 
-# Canonical department names shown in the UI
-# These are designed to be intuitive groupings that map reasonably
-# to both CMA and AIC department structures
-CANONICAL_DEPARTMENTS = [
+# Canonical genre names shown in the UI.
+CANONICAL_GENRES = [
     "African Art",
     "American Art",
     "Ancient Near Eastern Art",
     "Asian Art",
     "Contemporary Art",
-    "Decorative Arts",
-    "Drawings",
     "Egyptian Art",
     "European Art",
     "Greek and Roman Art",
     "Islamic Art",
     "Medieval Art",
     "Modern Art",
+]
+
+# Canonical medium names shown in the UI.
+CANONICAL_MEDIA = [
+    "Decorative Arts",
+    "Drawings",
+    "Painting",
     "Photography",
     "Prints",
+    "Sculpture",
     "Textiles",
 ]
 
-# Maps canonical name -> {museum_short_name: museum_specific_value}
+# Backward-compatible alias for callers that still refer to "departments".
+CANONICAL_DEPARTMENTS = CANONICAL_GENRES
+
+# Maps canonical genre -> {museum_short_name: museum_specific_value}
 # Values can be:
 #   - str: exact match
 #   - list[str]: any of these values (OR logic)
@@ -42,8 +46,8 @@ DEPARTMENT_MAP: dict[str, dict[str, str | list[str] | None]] = {
         "aic": "Arts of Africa",
     },
     "American Art": {
-        "cma": "American Painting and Sculpture",
-        "aic": "American Art",
+        "cma": ["American Painting and Sculpture", "Art of the Americas"],
+        "aic": ["American Art", "Arts of the Americas"],
     },
     "Ancient Near Eastern Art": {
         "cma": "Egyptian and Ancient Near Eastern Art",
@@ -56,14 +60,6 @@ DEPARTMENT_MAP: dict[str, dict[str, str | list[str] | None]] = {
     "Contemporary Art": {
         "cma": "Contemporary Art",
         "aic": "Contemporary Art",
-    },
-    "Decorative Arts": {
-        "cma": "Decorative Art and Design",
-        "aic": "Applied Arts of Europe",
-    },
-    "Drawings": {
-        "cma": "Drawings",
-        "aic": "Prints and Drawings",  # AIC combines these
     },
     "Egyptian Art": {
         "cma": "Egyptian and Ancient Near Eastern Art",
@@ -86,20 +82,8 @@ DEPARTMENT_MAP: dict[str, dict[str, str | list[str] | None]] = {
         "aic": "Medieval Art",
     },
     "Modern Art": {
-        "cma": "Modern European Painting and Sculpture",
-        "aic": "Modern Art",
-    },
-    "Photography": {
-        "cma": "Photography",
-        "aic": "Photography and Media",
-    },
-    "Prints": {
-        "cma": "Prints",
-        "aic": "Prints and Drawings",  # AIC combines these
-    },
-    "Textiles": {
-        "cma": "Textiles",
-        "aic": "Textiles",
+        "cma": ["Modern European Painting and Sculpture", "Contemporary Art"],
+        "aic": ["Modern Art", "Contemporary Art"],
     },
 }
 
@@ -131,9 +115,19 @@ def _build_reverse_map() -> None:
 _build_reverse_map()
 
 
+def get_canonical_genres() -> list[str]:
+    """Return canonical genre options for UI display."""
+    return CANONICAL_GENRES.copy()
+
+
+def get_canonical_media() -> list[str]:
+    """Return canonical medium options for UI display."""
+    return CANONICAL_MEDIA.copy()
+
+
 def get_canonical_departments() -> list[str]:
-    """Return list of canonical department names for UI display."""
-    return CANONICAL_DEPARTMENTS.copy()
+    """Backward-compatible alias for canonical genres."""
+    return get_canonical_genres()
 
 
 def map_to_museum(canonical: str, museum: str) -> str | list[str] | None:

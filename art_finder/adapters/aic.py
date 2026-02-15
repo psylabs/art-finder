@@ -19,6 +19,15 @@ class AICAdapter(MuseumAdapter):
     base_url = "https://api.artic.edu/api/v1/artworks/search"
     
     DEFAULT_IIIF_URL = "https://www.artic.edu/iiif/2"
+    MEDIUM_KEYWORDS: dict[str, list[str]] = {
+        "Decorative Arts": ["decorative", "applied arts"],
+        "Drawings": ["drawing"],
+        "Painting": ["painting"],
+        "Photography": ["photograph", "photo"],
+        "Prints": ["print", "etching", "lithograph", "woodcut"],
+        "Sculpture": ["sculpture", "statue"],
+        "Textiles": ["textile", "fabric", "tapestry"],
+    }
     
     def __init__(self) -> None:
         self._discovered_departments: set[str] = set()
@@ -30,6 +39,7 @@ class AICAdapter(MuseumAdapter):
             "id",
             "title",
             "artist_display",
+            "artist_title",
             "date_display",
             "date_start",
             "date_end",
@@ -41,6 +51,8 @@ class AICAdapter(MuseumAdapter):
             "thumbnail",
             "place_of_origin",
             "accession_number",
+            "is_public_domain",
+            "copyright_notice",
         ])
         
         params: dict[str, str | int] = {
@@ -71,6 +83,20 @@ class AICAdapter(MuseumAdapter):
                 result.filter_status.skipped["department"] = (
                     f"No AIC mapping for department: {filters.department}"
                 )
+
+        if filters.medium:
+            result.filter_status.applied["medium"] = f"Medium: {filters.medium} (client-side)"
+        if filters.place_of_origin:
+            result.filter_status.applied["place_of_origin"] = (
+                f"Place of origin contains: {filters.place_of_origin} (client-side)"
+            )
+
+        implicit_year_from = None
+        if filters.department == "Modern Art" and filters.year_from is None:
+            implicit_year_from = 1860
+            result.filter_status.applied["modern_year_guard"] = (
+                "Modern Art defaulted to year >= 1860 (override with Year Range)."
+            )
         
         self._log_info(
             f"Fetching from API (timeout={self.fetch_timeout}s, "
@@ -94,6 +120,8 @@ class AICAdapter(MuseumAdapter):
         # Track filtering stats
         year_filtered = 0
         dept_filtered = 0
+        medium_filtered = 0
+        origin_filtered = 0
         orientation_filtered = 0
         resolution_filtered = 0
         no_image = 0
@@ -109,27 +137,30 @@ class AICAdapter(MuseumAdapter):
                 
                 # Filter by department (client-side)
                 if museum_dept:
-                    if isinstance(museum_dept, list):
-                        if dept_title not in museum_dept:
-                            dept_filtered += 1
-                            continue
-                    elif dept_title != museum_dept:
+                    mapped_values = museum_dept if isinstance(museum_dept, list) else [museum_dept]
+                    dept_match = any(
+                        self.contains_case_insensitive(dept_title, mapped_value)
+                        for mapped_value in mapped_values
+                    )
+                    if not dept_match:
                         dept_filtered += 1
                         continue
                 
                 # Filter by year range (client-side)
-                if filters.year_from or filters.year_to:
+                year_from = filters.year_from if filters.year_from is not None else implicit_year_from
+                year_to = filters.year_to
+                if year_from or year_to:
                     date_start = item.get("date_start")
                     date_end = item.get("date_end")
                     
                     # Use date_end for year_from check, date_start for year_to check
                     # This catches artworks that span the requested range
-                    if filters.year_from and date_end is not None:
-                        if date_end < filters.year_from:
+                    if year_from and date_end is not None:
+                        if date_end < year_from:
                             year_filtered += 1
                             continue
-                    if filters.year_to and date_start is not None:
-                        if date_start > filters.year_to:
+                    if year_to and date_start is not None:
+                        if date_start > year_to:
                             year_filtered += 1
                             continue
                 
@@ -140,6 +171,25 @@ class AICAdapter(MuseumAdapter):
                     continue
                 
                 image_url = f"{iiif_url}/{image_id}/full/843,/0/default.jpg"
+
+                place_of_origin = self.normalize_place_of_origin(item.get("place_of_origin"))
+                if filters.place_of_origin:
+                    if not self.contains_case_insensitive(place_of_origin, filters.place_of_origin):
+                        origin_filtered += 1
+                        continue
+
+                if filters.medium:
+                    medium_text = self.normalize_text(item.get("medium_display"))
+                    class_text = self.normalize_text(item.get("classification_title"))
+                    combined_medium = " ".join([medium_text, class_text, dept_title]).strip()
+                    medium_keywords = self.MEDIUM_KEYWORDS.get(filters.medium, [filters.medium])
+                    medium_match = any(
+                        self.contains_case_insensitive(combined_medium, keyword)
+                        for keyword in medium_keywords
+                    )
+                    if not medium_match:
+                        medium_filtered += 1
+                        continue
                 
                 # Get thumbnail dimensions for orientation/resolution checks
                 thumb = item.get("thumbnail") or {}
@@ -147,7 +197,7 @@ class AICAdapter(MuseumAdapter):
                 height = thumb.get("height")
                 
                 # Filter by orientation
-                if filters.orientation:
+                if filters.orientation and filters.orientation != "Any":
                     if not self.check_orientation(width, height, filters.orientation):
                         orientation_filtered += 1
                         continue
@@ -167,12 +217,31 @@ class AICAdapter(MuseumAdapter):
                 # Build artwork object
                 title = item.get("title", "Untitled")
                 artwork_id = str(item.get("id", ""))
+                is_public_domain = item.get("is_public_domain")
+                if is_public_domain is True:
+                    is_downloadable = True
+                elif is_public_domain is False:
+                    is_downloadable = False
+                else:
+                    is_downloadable = True
+                rights_label = self.normalize_text(item.get("copyright_notice"))
+                if not rights_label:
+                    if is_public_domain is True:
+                        rights_label = "Public domain"
+                    elif is_public_domain is False:
+                        rights_label = "Restricted"
+                    else:
+                        rights_label = "Rights status unknown"
                 
                 artwork = Artwork(
                     id=artwork_id,
                     source=self.short_name,
                     title=title,
-                    artist=item.get("artist_display", "Unknown"),
+                    artist=(
+                        self.normalize_text(item.get("artist_display"))
+                        or self.normalize_text(item.get("artist_title"))
+                        or "Unknown"
+                    ),
                     image_url=image_url,
                     filename=self.create_filename(title, artwork_id, self.short_name),
                     date=item.get("date_display", ""),
@@ -180,7 +249,10 @@ class AICAdapter(MuseumAdapter):
                     department=dept_title,
                     classification=item.get("classification_title", ""),
                     credit=item.get("credit_line", ""),
-                    culture=item.get("place_of_origin", ""),
+                    culture=place_of_origin,
+                    place_of_origin=place_of_origin,
+                    is_downloadable=is_downloadable,
+                    rights_label=rights_label,
                     description=thumb.get("alt_text", ""),
                     accession_number=item.get("accession_number", ""),
                     image_width=width,
@@ -202,6 +274,10 @@ class AICAdapter(MuseumAdapter):
             self._log_info(f"Filtered {year_filtered} artworks by year range")
         if dept_filtered > 0:
             self._log_info(f"Filtered {dept_filtered} artworks by department")
+        if medium_filtered > 0:
+            self._log_info(f"Filtered {medium_filtered} artworks by medium")
+        if origin_filtered > 0:
+            self._log_info(f"Filtered {origin_filtered} artworks by place of origin")
         if orientation_filtered > 0:
             self._log_info(f"Filtered {orientation_filtered} artworks by orientation")
         if resolution_filtered > 0:

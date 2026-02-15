@@ -9,14 +9,14 @@ from typing import Any
 @dataclass
 class Artwork:
     """Unified artwork representation across all museum sources."""
-    
+
     id: str
     source: str  # Museum short name (e.g., "CMA", "AIC")
     title: str
     artist: str
     image_url: str
     filename: str  # Suggested download filename
-    
+
     # Optional fields with defaults
     date: str = ""
     medium: str = ""
@@ -27,14 +27,17 @@ class Artwork:
     dimensions: str = ""
     description: str = ""
     accession_number: str = ""
-    
+    place_of_origin: str = ""
+    is_downloadable: bool = True
+    rights_label: str = ""
+
     # Image dimensions (for orientation/resolution filtering)
     image_width: int | None = None
     image_height: int | None = None
-    
+
     # Museum-specific extras
     metadata: dict[str, Any] = field(default_factory=dict)
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for session state storage."""
         return {
@@ -53,6 +56,9 @@ class Artwork:
             "dimensions": self.dimensions,
             "description": self.description,
             "accession_number": self.accession_number,
+            "place_of_origin": self.place_of_origin,
+            "is_downloadable": self.is_downloadable,
+            "rights_label": self.rights_label,
             "image_width": self.image_width,
             "image_height": self.image_height,
             "metadata": self.metadata,
@@ -62,17 +68,22 @@ class Artwork:
 @dataclass
 class SearchFilters:
     """Unified search filters that adapters translate to API-specific params."""
-    
+
+    sources: list[str] = field(default_factory=lambda: ["CMA", "AIC"])
     query: str | None = None
     year_from: int | None = None
     year_to: int | None = None
-    department: str | None = None  # Canonical department name
+    department: str | None = None  # Canonical genre/department name
+    medium: str | None = None
+    place_of_origin: str | None = None
     orientation: str | None = None  # "Portrait" or "Landscape"
+    # Deprecated in v1 contract, kept for backward compatibility until FE changes land.
     min_width: int | None = None
     min_height: int | None = None
     has_image: bool = True
-    limit: int = 100
-    
+    limit: int = 50
+    random_seed: int | None = None
+
     # SSL bypass for debugging
     ssl_bypass: bool = False
 
@@ -80,7 +91,7 @@ class SearchFilters:
 @dataclass
 class FilterStatus:
     """Tracks which filters were applied vs skipped."""
-    
+
     applied: dict[str, str] = field(default_factory=dict)  # filter -> description
     skipped: dict[str, str] = field(default_factory=dict)  # filter -> reason
 
@@ -88,11 +99,13 @@ class FilterStatus:
 @dataclass
 class AdapterResult:
     """Result from an adapter search, including any errors or warnings."""
-    
+
     artworks: list[Artwork] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)  # User-friendly error messages
     warnings: list[str] = field(default_factory=list)  # Non-fatal issues
     filter_status: FilterStatus = field(default_factory=FilterStatus)
+    source_counts: dict[str, int] = field(default_factory=dict)
+    seed_used: int | None = None
     
     @property
     def success(self) -> bool:
