@@ -39,3 +39,4 @@ def get_adapter_names() -> dict[str, str]:
 # These imports must come after the registry is defined
 from . import cma  # noqa: E402, F401
 from . import aic  # noqa: E402, F401
+from . import moma  # noqa: E402, F401

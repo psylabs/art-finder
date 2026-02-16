@@ -44,46 +44,57 @@ DEPARTMENT_MAP: dict[str, dict[str, str | list[str] | None]] = {
     "African Art": {
         "cma": "African Art",
         "aic": "Arts of Africa",
+        "moma": ["africa", "african"],
     },
     "American Art": {
         "cma": ["American Painting and Sculpture", "Art of the Americas"],
         "aic": ["American Art", "Arts of the Americas"],
+        "moma": ["american", "united states", "u.s.", "usa"],
     },
     "Ancient Near Eastern Art": {
         "cma": "Egyptian and Ancient Near Eastern Art",
         "aic": "Ancient and Byzantine Art",
+        "moma": ["ancient", "near eastern", "mesopotamia", "assyrian"],
     },
     "Asian Art": {
         "cma": ["Chinese Art", "Japanese Art", "Korean Art", "Indian and South East Asian Art"],
         "aic": "Asian Art",
+        "moma": ["asian", "china", "chinese", "japan", "japanese", "korea", "korean", "india", "indian"],
     },
     "Contemporary Art": {
         "cma": "Contemporary Art",
         "aic": "Contemporary Art",
+        "moma": "contemporary",
     },
     "Egyptian Art": {
         "cma": "Egyptian and Ancient Near Eastern Art",
         "aic": "Ancient and Byzantine Art",
+        "moma": ["egypt", "egyptian"],
     },
     "European Art": {
         "cma": ["European Painting and Sculpture", "Modern European Painting and Sculpture"],
         "aic": ["Painting and Sculpture of Europe", "European Decorative Arts"],
+        "moma": ["europe", "european", "france", "french", "italy", "italian", "germany", "german", "spain", "spanish", "britain", "english", "dutch"],
     },
     "Greek and Roman Art": {
         "cma": "Greek and Roman Art",
         "aic": "Ancient and Byzantine Art",
+        "moma": ["greek", "roman"],
     },
     "Islamic Art": {
         "cma": "Islamic Art",
         "aic": "Islamic Art",
+        "moma": "islamic",
     },
     "Medieval Art": {
         "cma": "Medieval Art",
         "aic": "Medieval Art",
+        "moma": "medieval",
     },
     "Modern Art": {
         "cma": ["Modern European Painting and Sculpture", "Contemporary Art"],
         "aic": ["Modern Art", "Contemporary Art"],
+        "moma": "modern",
     },
 }
 

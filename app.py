@@ -17,6 +17,8 @@ DEFAULT_FETCH_LIMIT = 50
 FETCH_LIMIT_OPTIONS = [50, 100, 200, 500, 1000]
 ALL_GENRES_LABEL = "All genres"
 ALL_MEDIA_LABEL = "All media"
+MIN_FILTER_DATE = date(1, 1, 1)
+MAX_FILTER_DATE = date(2100, 12, 31)
 
 st.set_page_config(page_title="Art Findr", layout="wide")
 
@@ -81,6 +83,8 @@ def init_session_state():
         "year_from_last": None,
         "year_to": None,
         "year_to_last": None,
+        "year_from_date": None,
+        "year_to_date": None,
         "search_term": "",
         "search_term_last": "",
         # Options
@@ -372,34 +376,50 @@ def render_sidebar():
         # Year range
         st.markdown("**Date Range**")
         col1, col2 = st.columns(2)
-        year_from_default = (
-            date(st.session_state.year_from, 1, 1)
-            if st.session_state.year_from
-            else None
-        )
-        year_to_default = (
-            date(st.session_state.year_to, 12, 31)
-            if st.session_state.year_to
-            else None
-        )
+        year_from_default = st.session_state.year_from_date
+        if year_from_default is None and st.session_state.year_from:
+            year_from_default = date(st.session_state.year_from, 1, 1)
+        year_to_default = st.session_state.year_to_date
+        if year_to_default is None and st.session_state.year_to:
+            year_to_default = date(st.session_state.year_to, 12, 31)
         with col1:
-            from_date = st.date_input(
+            st.date_input(
                 "From date",
                 value=year_from_default,
                 key="year_from_date",
+                min_value=MIN_FILTER_DATE,
+                max_value=MAX_FILTER_DATE,
                 help="Earliest creation date (year is used for filtering).",
                 format="YYYY-MM-DD",
             )
-            st.session_state.year_from = from_date.year if from_date else None
+            if st.button("Clear", key="clear_from_date"):
+                st.session_state.year_from_date = None
+                st.session_state.year_from = None
+                st.rerun()
+            st.session_state.year_from = (
+                st.session_state.year_from_date.year
+                if st.session_state.year_from_date
+                else None
+            )
         with col2:
-            to_date = st.date_input(
+            st.date_input(
                 "To date",
                 value=year_to_default,
                 key="year_to_date",
+                min_value=MIN_FILTER_DATE,
+                max_value=MAX_FILTER_DATE,
                 help="Latest creation date (year is used for filtering).",
                 format="YYYY-MM-DD",
             )
-            st.session_state.year_to = to_date.year if to_date else None
+            if st.button("Clear", key="clear_to_date"):
+                st.session_state.year_to_date = None
+                st.session_state.year_to = None
+                st.rerun()
+            st.session_state.year_to = (
+                st.session_state.year_to_date.year
+                if st.session_state.year_to_date
+                else None
+            )
 
         st.caption("Filters apply when you click Load Artworks.")
 
@@ -542,6 +562,7 @@ def render_source_links(selected_sources: list[str]) -> None:
     source_links = {
         "AIC": "https://api.artic.edu/api/v1/artworks/search",
         "CMA": "https://openaccess-api.clevelandart.org/api/artworks",
+        "MOMA": "https://github.com/MuseumofModernArt/collection",
     }
     links: list[str] = []
     for source in selected_sources:
