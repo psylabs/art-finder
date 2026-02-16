@@ -21,6 +21,7 @@ ALL_GENRES_LABEL = "All genres"
 ALL_MEDIA_LABEL = "All media"
 MIN_FILTER_DATE = date(1, 1, 1)
 MAX_FILTER_DATE = date(2100, 12, 31)
+RIGHT_PANEL_CHAR_LIMIT = 100
 MUSEUM_LOGOS = {
     "AIC": "https://upload.wikimedia.org/wikipedia/commons/3/32/Art_Institute_of_Chicago_logo.svg",
     "CMA": "https://upload.wikimedia.org/wikipedia/commons/7/74/Logo_Cleveland_Museum_of_Art.svg",
@@ -32,6 +33,9 @@ st.set_page_config(page_title="Art Findr", layout="wide")
 st.markdown(
     """
 <style>
+.block-container {
+    padding-top: 0.9rem;
+}
 .art-image-frame {
     width: 100%;
     height: 68vh;
@@ -96,8 +100,6 @@ def init_session_state():
         "department_filter_last": ALL_GENRES_LABEL,
         "medium_filter": ALL_MEDIA_LABEL,
         "medium_filter_last": ALL_MEDIA_LABEL,
-        "place_origin_filter": "",
-        "place_origin_filter_last": "",
         "fetch_limit": DEFAULT_FETCH_LIMIT,
         "fetch_limit_last": DEFAULT_FETCH_LIMIT,
         "use_random_seed": False,
@@ -184,7 +186,6 @@ def check_filter_changes():
         ("orientation_filter", "orientation changed"),
         ("department_filter", "department changed"),
         ("medium_filter", "medium changed"),
-        ("place_origin_filter", "place of origin changed"),
         ("fetch_limit", "fetch limit changed"),
         ("year_from", "year range changed"),
         ("year_to", "year range changed"),
@@ -240,7 +241,6 @@ def fetch_artworks() -> AdapterResult:
             None if st.session_state.medium_filter == ALL_MEDIA_LABEL
             else st.session_state.medium_filter
         ),
-        place_of_origin=st.session_state.place_origin_filter.strip() or None,
         orientation=st.session_state.orientation_filter,
         has_image=True,
         limit=st.session_state.fetch_limit,
@@ -371,6 +371,10 @@ def get_medium_options() -> list[str]:
 def render_sidebar():
     """Render the sidebar with filters and debug console."""
     with st.sidebar:
+        with st.expander("Pages", expanded=False):
+            st.page_link("app.py", label="App")
+            st.page_link("pages/help.py", label="Help")
+
         st.subheader("Filters")
 
         adapter_names = get_adapter_names()
@@ -417,14 +421,6 @@ def render_sidebar():
             medium_options,
             key="medium_filter",
             help="Client-side medium normalization using each source's medium/classification fields.",
-        )
-
-        # Place of origin (third)
-        st.text_input(
-            "Place of origin contains",
-            value=st.session_state.place_origin_filter,
-            key="place_origin_filter",
-            help="Substring match across normalized place-of-origin values.",
         )
 
         st.text_input(
@@ -524,6 +520,13 @@ def render_sidebar():
 
 def render_artwork_display(artwork: dict):
     """Render the current artwork display."""
+    def truncate_text(value: object, limit: int = RIGHT_PANEL_CHAR_LIMIT) -> str:
+        """Convert to display text and truncate with '..' when too long."""
+        text = str(value).strip()
+        if len(text) <= limit:
+            return text
+        return text[: limit - 2].rstrip() + ".."
+
     idx = st.session_state.current_idx
     total = len(st.session_state.images)
 
@@ -546,9 +549,7 @@ def render_artwork_display(artwork: dict):
         )
 
     with col_meta:
-        title_text = str(artwork.get("title", "Untitled"))
-        if artwork.get("source") == "MOMA" and len(title_text) > 150:
-            title_text = title_text[:150].rstrip() + "..."
+        title_text = truncate_text(artwork.get("title", "Untitled"))
         st.subheader(title_text)
 
         # Source label
@@ -582,7 +583,6 @@ def render_artwork_display(artwork: dict):
             ("Medium", artwork.get("medium")),
             ("Credit", artwork.get("credit")),
             ("Culture", artwork.get("culture")),
-            ("Place of origin", artwork.get("place_of_origin")),
             (
                 "Downloadable",
                 "Yes" if artwork.get("is_downloadable", True) else "No",
@@ -596,6 +596,7 @@ def render_artwork_display(artwork: dict):
                 continue
             if isinstance(value, list):
                 value = ", ".join([str(v) for v in value if v])
+            value = truncate_text(value)
             target_col = meta_left if index % 2 == 0 else meta_right
             target_col.write(f"**{label}:** {value}")
 
@@ -651,11 +652,26 @@ def render_artwork_display(artwork: dict):
         # Extended metadata
         metadata = artwork.get("metadata", {})
         if metadata.get("tombstone"):
-            st.text_area("Tombstone", value=metadata["tombstone"], height=80, disabled=True)
+            st.text_area(
+                "Tombstone",
+                value=truncate_text(metadata["tombstone"]),
+                height=80,
+                disabled=True,
+            )
         if artwork.get("description"):
-            st.text_area("Description", value=artwork["description"], height=80, disabled=True)
+            st.text_area(
+                "Description",
+                value=truncate_text(artwork["description"]),
+                height=80,
+                disabled=True,
+            )
         if metadata.get("did_you_know"):
-            st.text_area("Did you know", value=metadata["did_you_know"], height=60, disabled=True)
+            st.text_area(
+                "Did you know",
+                value=truncate_text(metadata["did_you_know"]),
+                height=60,
+                disabled=True,
+            )
 
 
 def render_source_links(selected_sources: list[str]) -> None:

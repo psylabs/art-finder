@@ -49,7 +49,6 @@ class AICAdapter(MuseumAdapter):
             "credit_line",
             "image_id",
             "thumbnail",
-            "place_of_origin",
             "accession_number",
             "is_public_domain",
             "copyright_notice",
@@ -86,10 +85,6 @@ class AICAdapter(MuseumAdapter):
 
         if filters.medium:
             result.filter_status.applied["medium"] = f"Medium: {filters.medium} (client-side)"
-        if filters.place_of_origin:
-            result.filter_status.applied["place_of_origin"] = (
-                f"Place of origin contains: {filters.place_of_origin} (client-side)"
-            )
 
         implicit_year_from = None
         if filters.department == "Modern Art" and filters.year_from is None:
@@ -121,7 +116,6 @@ class AICAdapter(MuseumAdapter):
         year_filtered = 0
         dept_filtered = 0
         medium_filtered = 0
-        origin_filtered = 0
         orientation_filtered = 0
         resolution_filtered = 0
         no_image = 0
@@ -171,12 +165,6 @@ class AICAdapter(MuseumAdapter):
                     continue
                 
                 image_url = f"{iiif_url}/{image_id}/full/843,/0/default.jpg"
-
-                place_of_origin = self.normalize_place_of_origin(item.get("place_of_origin"))
-                if filters.place_of_origin:
-                    if not self.contains_case_insensitive(place_of_origin, filters.place_of_origin):
-                        origin_filtered += 1
-                        continue
 
                 if filters.medium:
                     medium_text = self.normalize_text(item.get("medium_display"))
@@ -249,8 +237,7 @@ class AICAdapter(MuseumAdapter):
                     department=dept_title,
                     classification=item.get("classification_title", ""),
                     credit=item.get("credit_line", ""),
-                    culture=place_of_origin,
-                    place_of_origin=place_of_origin,
+                    culture="",
                     is_downloadable=is_downloadable,
                     rights_label=rights_label,
                     description=thumb.get("alt_text", ""),
@@ -276,8 +263,6 @@ class AICAdapter(MuseumAdapter):
             self._log_info(f"Filtered {dept_filtered} artworks by department")
         if medium_filtered > 0:
             self._log_info(f"Filtered {medium_filtered} artworks by medium")
-        if origin_filtered > 0:
-            self._log_info(f"Filtered {origin_filtered} artworks by place of origin")
         if orientation_filtered > 0:
             self._log_info(f"Filtered {orientation_filtered} artworks by orientation")
         if resolution_filtered > 0:

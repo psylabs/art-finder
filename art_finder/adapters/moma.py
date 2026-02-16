@@ -9,6 +9,7 @@ import re
 from typing import Any
 
 import requests
+from PIL import Image, UnidentifiedImageError
 
 from . import register
 from .base import MuseumAdapter
@@ -37,6 +38,7 @@ class MOMAAdapter(MuseumAdapter):
 
     _dataset_cache: list[dict[str, str]] | None = None
     _departments_cache: list[str] | None = None
+    _image_dims_cache: dict[str, tuple[int | None, int | None]] = {}
 
     @staticmethod
     def _first(row: dict[str, str], *keys: str) -> str:
@@ -123,6 +125,36 @@ class MOMAAdapter(MuseumAdapter):
         cls._departments_cache = sorted(departments)
         return rows
 
+    @classmethod
+    def _resolve_image_dimensions(
+        cls, image_url: str, ssl_bypass: bool
+    ) -> tuple[int | None, int | None]:
+        """Resolve image pixel dimensions with memoized HTTP fallback."""
+        cached = cls._image_dims_cache.get(image_url)
+        if cached is not None:
+            return cached
+
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+            "Referer": "https://www.moma.org/",
+        }
+        try:
+            response = requests.get(
+                image_url,
+                headers=headers,
+                timeout=20,
+                verify=not ssl_bypass,
+            )
+            response.raise_for_status()
+            with Image.open(io.BytesIO(response.content)) as image:
+                dims = image.size
+        except (requests.RequestException, UnidentifiedImageError, OSError):
+            dims = (None, None)
+
+        cls._image_dims_cache[image_url] = dims
+        return dims
+
     def _do_search(self, filters: SearchFilters, result: AdapterResult) -> list[Artwork]:
         """Search MoMA dataset client-side using normalized filters."""
         self._log_info(
@@ -135,10 +167,6 @@ class MOMAAdapter(MuseumAdapter):
             result.filter_status.applied["department"] = f"Genre: {filters.department} (mapped)"
         if filters.medium:
             result.filter_status.applied["medium"] = f"Medium: {filters.medium} (client-side)"
-        if filters.place_of_origin:
-            result.filter_status.applied["place_of_origin"] = (
-                f"Place of origin contains: {filters.place_of_origin} (client-side)"
-            )
         if filters.query:
             result.filter_status.applied["query"] = f"Search term: {filters.query}"
 
@@ -156,7 +184,6 @@ class MOMAAdapter(MuseumAdapter):
 
         genre_filtered = 0
         medium_filtered = 0
-        origin_filtered = 0
         query_filtered = 0
         year_filtered = 0
         orientation_filtered = 0
@@ -174,11 +201,6 @@ class MOMAAdapter(MuseumAdapter):
             medium = row["medium"]
             nationality = row["nationality"]
             artist_bio = row["artist_bio"]
-
-            place_of_origin = self.normalize_place_of_origin(
-                nationality,
-                fallback=artist_bio,
-            )
 
             haystack = " ".join(
                 [title, artist, department, classification, medium, nationality, artist_bio]
@@ -210,12 +232,6 @@ class MOMAAdapter(MuseumAdapter):
                     medium_filtered += 1
                     continue
 
-            if filters.place_of_origin and not self.contains_case_insensitive(
-                place_of_origin, filters.place_of_origin
-            ):
-                origin_filtered += 1
-                continue
-
             begin_year = self._parse_year(row["begin_date"])
             end_year = self._parse_year(row["end_date"])
             year_from = filters.year_from if filters.year_from is not None else implicit_year_from
@@ -230,15 +246,24 @@ class MOMAAdapter(MuseumAdapter):
 
             width_cm = self._parse_dimension_cm(row["width_cm"])
             height_cm = self._parse_dimension_cm(row["height_cm"])
-            if filters.orientation and filters.orientation != "Any":
-                if not self.check_orientation(width_cm, height_cm, filters.orientation):
-                    orientation_filtered += 1
-                    continue
-
             image_url = row["image_url"].strip()
             if not image_url:
                 no_image += 1
                 continue
+
+            if (
+                filters.orientation
+                and filters.orientation != "Any"
+                and (width_cm is None or height_cm is None)
+            ):
+                width_cm, height_cm = self._resolve_image_dimensions(
+                    image_url, filters.ssl_bypass
+                )
+
+            if filters.orientation and filters.orientation != "Any":
+                if not self.check_orientation(width_cm, height_cm, filters.orientation):
+                    orientation_filtered += 1
+                    continue
 
             object_id = row["object_id"] or f"moma-{len(artworks)}"
             rights_label = "MoMA collection image URL from dataset (rights may vary)."
@@ -256,7 +281,6 @@ class MOMAAdapter(MuseumAdapter):
                 classification=classification,
                 credit=row["credit_line"],
                 culture=nationality,
-                place_of_origin=place_of_origin,
                 dimensions=row["dimensions"],
                 description=row["description"],
                 accession_number=row["accession"],
@@ -278,8 +302,6 @@ class MOMAAdapter(MuseumAdapter):
             self._log_info(f"Filtered out {genre_filtered} rows by genre mapping")
         if medium_filtered > 0:
             self._log_info(f"Filtered out {medium_filtered} rows by medium")
-        if origin_filtered > 0:
-            self._log_info(f"Filtered out {origin_filtered} rows by place of origin")
         if query_filtered > 0:
             self._log_info(f"Filtered out {query_filtered} rows by query")
         if year_filtered > 0:

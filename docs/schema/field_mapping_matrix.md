@@ -9,7 +9,6 @@ This document shows how normalized UI filters and output fields map to source AP
 | `query` | `str` | request param `q` | request param `q` | request param emulation over dataset rows | API-level where supported; otherwise client-side search |
 | `department` (UI label: Genre) | enum | request param `department` when 1:1 mapping; client-side OR match when many-to-many | client-side over `department_title` | client-side over `Department`, `Classification`, `Medium`, `Nationality`, `ArtistBio` | canonical-to-source mapping + case-insensitive contains |
 | `medium` | enum | client-side over `technique`, `type`, `department` | client-side over `medium_display`, `classification_title`, `department_title` | client-side over `Medium`, `Classification`, `Department` | keyword-based contains |
-| `place_of_origin` | `str` | client-side over normalized `place_of_origin` fallback `culture` | client-side over `place_of_origin` | client-side over normalized `Nationality` fallback `ArtistBio` | case-insensitive substring |
 | `year_from` / `year_to` | `int` | request params `created_after` / `created_before` | client-side over `date_start` / `date_end` | client-side over `BeginDate` / `EndDate` | range overlap logic |
 | `orientation` | enum | client-side over image width/height | client-side over thumbnail width/height | client-side over parsed `Width (cm)` / `Height (cm)` | portrait/landscape check |
 | `limit` | `int` | request param `limit` | request param `limit` | client-side trim | API-level + merged trim |
@@ -84,7 +83,6 @@ Notes:
 | `department` | `department` | `department_title` | `Department` |
 | `classification` | `type` | `classification_title` | `Classification` |
 | `medium` | `technique` | `medium_display` | `Medium` |
-| `place_of_origin` | `place_of_origin` fallback `culture` | `place_of_origin` | `Nationality` fallback `ArtistBio` |
 | `rights_label` | `share_license_status` fallback normalized default | `copyright_notice` fallback public-domain/restricted | metadata/thumbnail-rights placeholder |
 | `is_downloadable` | derived from image/licensing markers | derived from `is_public_domain` | currently `False` (metadata-first) |
 

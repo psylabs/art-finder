@@ -102,10 +102,6 @@ class CMAAdapter(MuseumAdapter):
 
         if filters.medium:
             result.filter_status.applied["medium"] = f"Medium: {filters.medium} (client-side)"
-        if filters.place_of_origin:
-            result.filter_status.applied["place_of_origin"] = (
-                f"Place of origin contains: {filters.place_of_origin} (client-side)"
-            )
         
         self._log_info(
             f"Fetching from CMA API (timeout={self.fetch_timeout}s, "
@@ -130,7 +126,6 @@ class CMAAdapter(MuseumAdapter):
         artworks: list[Artwork] = []
         dept_filtered = 0
         medium_filtered = 0
-        origin_filtered = 0
         orientation_filtered = 0
         resolution_filtered = 0
         
@@ -160,14 +155,6 @@ class CMAAdapter(MuseumAdapter):
                         continue
 
                 culture_value = self.normalize_text(item.get("culture"))
-                place_of_origin = self.normalize_place_of_origin(
-                    item.get("place_of_origin"),
-                    fallback=culture_value,
-                )
-                if filters.place_of_origin:
-                    if not self.contains_case_insensitive(place_of_origin, filters.place_of_origin):
-                        origin_filtered += 1
-                        continue
 
                 if filters.medium:
                     medium_text = self.normalize_text(item.get("technique"))
@@ -251,7 +238,6 @@ class CMAAdapter(MuseumAdapter):
                     classification=item.get("type") or "",
                     credit=item.get("creditline") or "",
                     culture=culture_value,
-                    place_of_origin=place_of_origin,
                     is_downloadable=is_downloadable,
                     rights_label=rights_label,
                     dimensions=item.get("dimensions") or "",
@@ -281,8 +267,6 @@ class CMAAdapter(MuseumAdapter):
             self._log_info(f"Filtered out {dept_filtered} artworks by department")
         if medium_filtered > 0:
             self._log_info(f"Filtered out {medium_filtered} artworks by medium")
-        if origin_filtered > 0:
-            self._log_info(f"Filtered out {origin_filtered} artworks by place of origin")
 
         if orientation_filtered > 0:
             self._log_info(f"Filtered out {orientation_filtered} artworks by orientation")

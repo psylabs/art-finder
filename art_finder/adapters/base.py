@@ -125,12 +125,12 @@ class MuseumAdapter(ABC):
         """Check if dimensions match the requested orientation."""
         if width is None or height is None:
             return True  # Can't filter without dimensions
-        
-        is_portrait = height > width
+
         if orientation == "Portrait":
-            return is_portrait
+            # Treat square images as portrait so they are retained.
+            return height >= width
         elif orientation == "Landscape":
-            return not is_portrait
+            return width > height
         return True  # Unknown orientation, don't filter
     
     def check_resolution(self, width: int | None, height: int | None,
@@ -151,14 +151,6 @@ class MuseumAdapter(ABC):
             parts = [str(item).strip() for item in value if str(item).strip()]
             return ", ".join(parts)
         return str(value).strip()
-
-    @classmethod
-    def normalize_place_of_origin(cls, value: Any, fallback: Any = "") -> str:
-        """Normalize place-of-origin data with a fallback value."""
-        normalized = cls.normalize_text(value)
-        if normalized:
-            return normalized
-        return cls.normalize_text(fallback)
 
     @staticmethod
     def contains_case_insensitive(value: str, query: str) -> bool:

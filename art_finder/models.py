@@ -27,7 +27,6 @@ class Artwork:
     dimensions: str = ""
     description: str = ""
     accession_number: str = ""
-    place_of_origin: str = ""
     is_downloadable: bool = True
     rights_label: str = ""
 
@@ -56,7 +55,6 @@ class Artwork:
             "dimensions": self.dimensions,
             "description": self.description,
             "accession_number": self.accession_number,
-            "place_of_origin": self.place_of_origin,
             "is_downloadable": self.is_downloadable,
             "rights_label": self.rights_label,
             "image_width": self.image_width,
@@ -75,7 +73,6 @@ class SearchFilters:
     year_to: int | None = None
     department: str | None = None  # Canonical genre/department name
     medium: str | None = None
-    place_of_origin: str | None = None
     orientation: str | None = None  # "Portrait" or "Landscape"
     # Deprecated in v1 contract, kept for backward compatibility until FE changes land.
     min_width: int | None = None
