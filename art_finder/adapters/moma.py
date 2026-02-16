@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
+import random
 import re
 from typing import Any
 
@@ -24,7 +25,6 @@ class MOMAAdapter(MuseumAdapter):
     base_url = "https://media.githubusercontent.com/media/MuseumofModernArt/collection/main/Artworks.csv"
     fetch_timeout = 90
 
-    PLACEHOLDER_IMAGE = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="
     MEDIUM_KEYWORDS: dict[str, list[str]] = {
         "Decorative Arts": ["decorative", "design", "furniture", "applied"],
         "Drawings": ["drawing"],
@@ -160,9 +160,13 @@ class MOMAAdapter(MuseumAdapter):
         query_filtered = 0
         year_filtered = 0
         orientation_filtered = 0
+        no_image = 0
 
         artworks: list[Artwork] = []
-        for row in rows:
+        rows_to_scan = list(rows)
+        random.Random(filters.random_seed).shuffle(rows_to_scan)
+
+        for row in rows_to_scan:
             title = row["title"] or "Untitled"
             artist = row["artist"] or "Unknown"
             department = row["department"]
@@ -231,14 +235,13 @@ class MOMAAdapter(MuseumAdapter):
                     orientation_filtered += 1
                     continue
 
+            image_url = row["image_url"].strip()
+            if not image_url:
+                no_image += 1
+                continue
+
             object_id = row["object_id"] or f"moma-{len(artworks)}"
-            image_url = row["image_url"] or self.PLACEHOLDER_IMAGE
-            has_image = bool(row["image_url"])
-            rights_label = (
-                "MoMA collection image URL from dataset (rights may vary)."
-                if has_image
-                else "Metadata only (no image URL in MoMA dataset)"
-            )
+            rights_label = "MoMA collection image URL from dataset (rights may vary)."
 
             artwork = Artwork(
                 id=object_id,
@@ -259,7 +262,7 @@ class MOMAAdapter(MuseumAdapter):
                 accession_number=row["accession"],
                 image_width=width_cm,
                 image_height=height_cm,
-                is_downloadable=has_image,
+                is_downloadable=True,
                 rights_label=rights_label,
                 metadata={
                     "url": row["url"],
@@ -283,6 +286,8 @@ class MOMAAdapter(MuseumAdapter):
             self._log_info(f"Filtered out {year_filtered} rows by year range")
         if orientation_filtered > 0:
             self._log_info(f"Filtered out {orientation_filtered} rows by orientation")
+        if no_image > 0:
+            self._log_info(f"Skipped {no_image} rows without image URLs")
 
         return artworks
 

@@ -2,8 +2,10 @@
 
 from datetime import date, datetime
 import html
+import re
 import requests
 import streamlit as st
+from urllib.parse import urlparse
 
 from art_finder.adapters import get_adapter_names
 from art_finder.models import SearchFilters, AdapterResult
@@ -19,6 +21,11 @@ ALL_GENRES_LABEL = "All genres"
 ALL_MEDIA_LABEL = "All media"
 MIN_FILTER_DATE = date(1, 1, 1)
 MAX_FILTER_DATE = date(2100, 12, 31)
+MUSEUM_LOGOS = {
+    "AIC": "https://upload.wikimedia.org/wikipedia/commons/3/32/Art_Institute_of_Chicago_logo.svg",
+    "CMA": "https://upload.wikimedia.org/wikipedia/commons/7/74/Logo_Cleveland_Museum_of_Art.svg",
+    "MOMA": "https://upload.wikimedia.org/wikipedia/commons/2/21/Museum_of_Modern_Art_logo.svg",
+}
 
 st.set_page_config(page_title="Art Findr", layout="wide")
 
@@ -43,6 +50,25 @@ st.markdown(
     max-height: 100%;
     object-fit: contain;
 }
+.museum-source {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 0.5rem;
+}
+.museum-source img {
+    height: 18px;
+    max-width: 88px;
+    width: auto;
+    object-fit: contain;
+}
+.museum-source img.museum-logo-moma {
+    height: 14px;
+    max-width: 76px;
+}
+.museum-source .museum-source-name {
+    font-size: 0.92rem;
+}
 </style>
 """,
     unsafe_allow_html=True,
@@ -62,8 +88,8 @@ def init_session_state():
         "debug_logs": [],
         "last_result": None,  # Store AdapterResult for filter feedback
         # Filters
-        "selected_sources": ["CMA", "AIC"],
-        "selected_sources_last": ["CMA", "AIC"],
+        "selected_sources": ["MOMA", "CMA", "AIC"],
+        "selected_sources_last": ["MOMA", "CMA", "AIC"],
         "orientation_filter": "Portrait",
         "orientation_filter_last": "Portrait",
         "department_filter": ALL_GENRES_LABEL,
@@ -228,19 +254,42 @@ def fetch_artworks() -> AdapterResult:
     return search_aggregated(filters, log_callback=adapter_log_callback)
 
 
-def download_high_res(image_url: str) -> bytes | None:
+@st.cache_data(show_spinner=False, ttl=3600, max_entries=512)
+def download_high_res(image_url: str, ssl_bypass: bool) -> tuple[bytes | None, str]:
     """Download high-resolution image."""
     try:
+        parsed = urlparse(image_url)
+        referer = f"{parsed.scheme}://{parsed.netloc}/" if parsed.scheme and parsed.netloc else ""
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36"
+            ),
+            "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+        }
+        if referer:
+            headers["Referer"] = referer
         response = requests.get(
             image_url,
             timeout=IMAGE_TIMEOUT,
-            verify=not st.session_state.ssl_bypass
+            verify=not ssl_bypass,
+            headers=headers,
         )
+        if response.status_code == 403 and "moma.org" in (parsed.netloc or ""):
+            headers["Referer"] = "https://www.moma.org/"
+            response = requests.get(
+                image_url,
+                timeout=IMAGE_TIMEOUT,
+                verify=not ssl_bypass,
+                headers=headers,
+            )
         response.raise_for_status()
-        return response.content
+        mime_type = response.headers.get("content-type", "application/octet-stream")
+        mime_type = mime_type.split(";")[0].strip() or "application/octet-stream"
+        return response.content, mime_type
     except requests.exceptions.RequestException as e:
         log_error(f"Download failed: {e}")
-        return None
+        return None, ""
 
 
 # =============================================================================
@@ -253,14 +302,33 @@ def render_filter_feedback(result: AdapterResult):
         return
     
     status = result.filter_status
+
+    def clean_description(description: str) -> str:
+        """Strip implementation details from filter descriptions."""
+        cleaned = re.sub(r"\s*\((?:client-side|mapped)\)\s*", "", description).strip()
+        cleaned = re.sub(r"\s{2,}", " ", cleaned)
+        return cleaned
     
     # Show applied filters
     if status.applied:
         with st.expander("✓ Filters Applied", expanded=False):
-            for name, desc in status.applied.items():
+            deduped: dict[str, set[str]] = {}
+            for name, description in status.applied.items():
                 if "random_seed" in name:
                     continue
-                st.caption(f"• {desc}")
+                source = name.split(".", 1)[0].upper() if "." in name else ""
+                cleaned = clean_description(description)
+                if not cleaned:
+                    continue
+                deduped.setdefault(cleaned, set())
+                if source:
+                    deduped[cleaned].add(source)
+
+            for description, sources in deduped.items():
+                if sources and len(sources) > 1:
+                    st.caption(f"• {description} ({', '.join(sorted(sources))})")
+                else:
+                    st.caption(f"• {description}")
     
     # Show skipped filters (warnings)
     if status.skipped:
@@ -478,12 +546,31 @@ def render_artwork_display(artwork: dict):
         )
 
     with col_meta:
-        st.subheader(artwork["title"])
+        title_text = str(artwork.get("title", "Untitled"))
+        if artwork.get("source") == "MOMA" and len(title_text) > 150:
+            title_text = title_text[:150].rstrip() + "..."
+        st.subheader(title_text)
 
         # Source label
         adapter_names = get_adapter_names()
-        source_name = adapter_names.get(artwork.get("source", ""), artwork.get("source", "Unknown"))
-        st.caption(f"Source: {source_name}")
+        source_code = artwork.get("source", "")
+        source_name = adapter_names.get(source_code, source_code or "Unknown")
+        logo_url = MUSEUM_LOGOS.get(source_code)
+        if logo_url:
+            logo_class = "museum-logo-moma" if source_code == "MOMA" else ""
+            st.markdown(
+                (
+                    '<div class="museum-source">'
+                    f'<img src="{html.escape(logo_url, quote=True)}" '
+                    f'class="{logo_class}" '
+                    f'alt="{html.escape(source_name, quote=True)} logo" />'
+                    f'<span class="museum-source-name">{html.escape(source_name)}</span>'
+                    "</div>"
+                ),
+                unsafe_allow_html=True,
+            )
+        else:
+            st.caption(f"Source: {source_name}")
 
         # Metadata grid
         meta_left, meta_right = st.columns(2)
@@ -528,13 +615,20 @@ def render_artwork_display(artwork: dict):
 
         with col_download:
             if artwork.get("is_downloadable", True):
-                img_data = download_high_res(artwork["image_url"])
+                download_key_suffix = (
+                    f'{artwork.get("source", "SRC")}-{artwork.get("id", "ID")}'
+                )
+                img_data, mime_type = download_high_res(
+                    artwork["image_url"],
+                    st.session_state.ssl_bypass,
+                )
                 if img_data:
                     download_clicked = st.download_button(
                         label="⬇️ Download",
                         data=img_data,
                         file_name=artwork.get("filename", "artwork.jpg"),
-                        mime="image/jpeg",
+                        mime=mime_type or "application/octet-stream",
+                        key=f"download_{download_key_suffix}",
                         type="primary",
                     )
                     if download_clicked:
@@ -542,9 +636,17 @@ def render_artwork_display(artwork: dict):
                         st.session_state.current_idx += 1
                         st.rerun()
                 else:
-                    st.button("⬇️ Download", type="primary", disabled=True)
+                    if st.button("Retry", key=f"retry_{download_key_suffix}", type="secondary"):
+                        download_high_res.clear()
+                        st.rerun()
+                    st.button(
+                        "⬇️ Download",
+                        key=f"download_disabled_{download_key_suffix}",
+                        type="primary",
+                        disabled=True,
+                    )
             else:
-                st.button("⬇️ Download", type="primary", disabled=True)
+                st.button("⬇️ Download", type="primary", disabled=True, key="download_locked")
 
         # Extended metadata
         metadata = artwork.get("metadata", {})
