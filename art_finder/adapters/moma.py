@@ -3,13 +3,10 @@
 from __future__ import annotations
 
 import csv
-import io
-import random
 import re
 from typing import Any
 
 import requests
-from PIL import Image, UnidentifiedImageError
 
 from . import register
 from .base import MuseumAdapter
@@ -36,9 +33,7 @@ class MOMAAdapter(MuseumAdapter):
         "Textiles": ["textile", "fabric", "tapestry"],
     }
 
-    _dataset_cache: list[dict[str, str]] | None = None
     _departments_cache: list[str] | None = None
-    _image_dims_cache: dict[str, tuple[int | None, int | None]] = {}
 
     @staticmethod
     def _first(row: dict[str, str], *keys: str) -> str:
@@ -78,90 +73,58 @@ class MOMAAdapter(MuseumAdapter):
             return None
 
     @classmethod
-    def _dataset_rows(cls, ssl_bypass: bool) -> list[dict[str, str]]:
-        """Load and cache MoMA dataset rows."""
-        if cls._dataset_cache is not None:
-            return cls._dataset_cache
+    def _iter_dataset_rows(cls, ssl_bypass: bool):
+        """Stream MoMA dataset rows to keep memory bounded on Cloud Run."""
+        departments: set[str] = set()
 
-        response = requests.get(
+        with requests.get(
             cls.base_url,
             timeout=cls.fetch_timeout,
             verify=not ssl_bypass,
-        )
-        response.raise_for_status()
-
-        text = response.content.decode("utf-8", errors="replace")
-        reader = csv.DictReader(io.StringIO(text))
-        rows: list[dict[str, str]] = []
-        departments: set[str] = set()
-
-        for row in reader:
-            normalized = {
-                "object_id": cls._first(row, "ObjectID", "Object ID"),
-                "title": cls._first(row, "\ufeffTitle", "Title"),
-                "artist": cls._first(row, "Artist", "ArtistDisplayName"),
-                "artist_bio": cls._first(row, "ArtistBio", "Artist Bio"),
-                "nationality": cls._first(row, "Nationality"),
-                "date_display": cls._first(row, "Date"),
-                "begin_date": cls._first(row, "BeginDate", "Begin Date"),
-                "end_date": cls._first(row, "EndDate", "End Date"),
-                "medium": cls._first(row, "Medium"),
-                "classification": cls._first(row, "Classification"),
-                "department": cls._first(row, "Department"),
-                "credit_line": cls._first(row, "CreditLine", "Credit Line"),
-                "accession": cls._first(row, "AccessionNumber", "Accession Number"),
-                "dimensions": cls._first(row, "Dimensions"),
-                "description": cls._first(row, "DateAcquired", "Date Acquired"),
-                "url": cls._first(row, "URL"),
-                "image_url": cls._first(row, "ImageURL", "Image URL"),
-                "width_cm": cls._first(row, "Width (cm)", "Width(cm)"),
-                "height_cm": cls._first(row, "Height (cm)", "Height(cm)"),
-            }
-            if normalized["department"]:
-                departments.add(normalized["department"])
-            rows.append(normalized)
-
-        cls._dataset_cache = rows
-        cls._departments_cache = sorted(departments)
-        return rows
-
-    @classmethod
-    def _resolve_image_dimensions(
-        cls, image_url: str, ssl_bypass: bool
-    ) -> tuple[int | None, int | None]:
-        """Resolve image pixel dimensions with memoized HTTP fallback."""
-        cached = cls._image_dims_cache.get(image_url)
-        if cached is not None:
-            return cached
-
-        headers = {
-            "User-Agent": "Mozilla/5.0",
-            "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
-            "Referer": "https://www.moma.org/",
-        }
-        try:
-            response = requests.get(
-                image_url,
-                headers=headers,
-                timeout=20,
-                verify=not ssl_bypass,
-            )
+            stream=True,
+        ) as response:
             response.raise_for_status()
-            with Image.open(io.BytesIO(response.content)) as image:
-                dims = image.size
-        except (requests.RequestException, UnidentifiedImageError, OSError):
-            dims = (None, None)
+            lines = (
+                line.decode("utf-8", errors="replace")
+                for line in response.iter_lines()
+                if line
+            )
+            reader = csv.DictReader(lines)
 
-        cls._image_dims_cache[image_url] = dims
-        return dims
+            for row in reader:
+                normalized = {
+                    "object_id": cls._first(row, "ObjectID", "Object ID"),
+                    "title": cls._first(row, "\ufeffTitle", "Title"),
+                    "artist": cls._first(row, "Artist", "ArtistDisplayName"),
+                    "artist_bio": cls._first(row, "ArtistBio", "Artist Bio"),
+                    "nationality": cls._first(row, "Nationality"),
+                    "date_display": cls._first(row, "Date"),
+                    "begin_date": cls._first(row, "BeginDate", "Begin Date"),
+                    "end_date": cls._first(row, "EndDate", "End Date"),
+                    "medium": cls._first(row, "Medium"),
+                    "classification": cls._first(row, "Classification"),
+                    "department": cls._first(row, "Department"),
+                    "credit_line": cls._first(row, "CreditLine", "Credit Line"),
+                    "accession": cls._first(row, "AccessionNumber", "Accession Number"),
+                    "dimensions": cls._first(row, "Dimensions"),
+                    "description": cls._first(row, "DateAcquired", "Date Acquired"),
+                    "url": cls._first(row, "URL"),
+                    "image_url": cls._first(row, "ImageURL", "Image URL"),
+                    "width_cm": cls._first(row, "Width (cm)", "Width(cm)"),
+                    "height_cm": cls._first(row, "Height (cm)", "Height(cm)"),
+                }
+                if normalized["department"]:
+                    departments.add(normalized["department"])
+                yield normalized
+
+        cls._departments_cache = sorted(departments)
 
     def _do_search(self, filters: SearchFilters, result: AdapterResult) -> list[Artwork]:
         """Search MoMA dataset client-side using normalized filters."""
         self._log_info(
             f"Loading MoMA dataset (ssl_bypass={filters.ssl_bypass}, limit={filters.limit})"
         )
-        rows = self._dataset_rows(filters.ssl_bypass)
-        self._log_info(f"Dataset loaded: {len(rows)} rows")
+        rows = self._iter_dataset_rows(filters.ssl_bypass)
 
         if filters.department:
             result.filter_status.applied["department"] = f"Genre: {filters.department} (mapped)"
@@ -173,6 +136,10 @@ class MOMAAdapter(MuseumAdapter):
         if filters.min_width or filters.min_height:
             result.filter_status.skipped["resolution"] = (
                 "MoMA dataset does not provide pixel dimensions; resolution filter skipped"
+            )
+        if filters.random_seed is not None:
+            result.filter_status.skipped["random_seed"] = (
+                "MoMA dataset is streamed for memory safety; per-row random shuffle skipped."
             )
 
         implicit_year_from = None
@@ -190,10 +157,9 @@ class MOMAAdapter(MuseumAdapter):
         no_image = 0
 
         artworks: list[Artwork] = []
-        rows_to_scan = list(rows)
-        random.Random(filters.random_seed).shuffle(rows_to_scan)
+        orientation_without_dimensions = 0
 
-        for row in rows_to_scan:
+        for row in rows:
             title = row["title"] or "Untitled"
             artist = row["artist"] or "Unknown"
             department = row["department"]
@@ -251,16 +217,10 @@ class MOMAAdapter(MuseumAdapter):
                 no_image += 1
                 continue
 
-            if (
-                filters.orientation
-                and filters.orientation != "Any"
-                and (width_cm is None or height_cm is None)
-            ):
-                width_cm, height_cm = self._resolve_image_dimensions(
-                    image_url, filters.ssl_bypass
-                )
-
             if filters.orientation and filters.orientation != "Any":
+                if width_cm is None or height_cm is None:
+                    orientation_without_dimensions += 1
+                    continue
                 if not self.check_orientation(width_cm, height_cm, filters.orientation):
                     orientation_filtered += 1
                     continue
@@ -308,6 +268,10 @@ class MOMAAdapter(MuseumAdapter):
             self._log_info(f"Filtered out {year_filtered} rows by year range")
         if orientation_filtered > 0:
             self._log_info(f"Filtered out {orientation_filtered} rows by orientation")
+        if orientation_without_dimensions > 0:
+            result.filter_status.skipped["orientation_unknown_dimensions"] = (
+                f"Skipped {orientation_without_dimensions} MoMA rows with unknown dimensions for orientation filter."
+            )
         if no_image > 0:
             self._log_info(f"Skipped {no_image} rows without image URLs")
 
