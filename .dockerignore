@@ -15,8 +15,10 @@ __pycache__/
 .claude/
 .mcp.json
 .playwright-cli/
+web/node_modules/
+web/dist/
+web/playwright-report/
+web/test-results/
 *.md
-Dockerfile
-.dockerignore
 inspect_page.py
 test_filters.py

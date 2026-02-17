@@ -1,0 +1,49 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 43 78% 96%;
+    --foreground: 220 26% 14%;
+    --card: 0 0% 100%;
+    --card-foreground: 220 26% 14%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 26% 14%;
+    --primary: 20 69% 21%;
+    --primary-foreground: 48 100% 97%;
+    --secondary: 42 73% 92%;
+    --secondary-foreground: 220 26% 14%;
+    --muted: 42 65% 93%;
+    --muted-foreground: 220 10% 43%;
+    --accent: 43 83% 88%;
+    --accent-foreground: 220 26% 14%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 37 36% 83%;
+    --input: 37 36% 83%;
+    --ring: 37 92% 45%;
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply m-0 bg-background text-foreground;
+  }
+}
+
+@layer components {
+  .date-input::-webkit-calendar-picker-indicator {
+    opacity: 0;
+    position: absolute;
+    right: 0.5rem;
+    width: 1rem;
+    height: 1rem;
+    cursor: pointer;
+  }
+}
