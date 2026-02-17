@@ -5,9 +5,12 @@ import {
   ArrowRight,
   Bug,
   CalendarRange,
+  ChevronLeft,
+  ChevronRight,
   Download,
   Filter,
   Info,
+  Landmark,
   Loader2,
   Palette,
   Search,
@@ -373,19 +376,41 @@ export function AppPage() {
   }
 
   return (
-    <div className="grid items-start gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
-      <Sidebar className="xl:sticky xl:top-16">
+    <div className={cn("grid items-start gap-4", layoutState.isSidebarCollapsed ? "xl:grid-cols-[72px_minmax(0,1fr)]" : "xl:grid-cols-[320px_minmax(0,1fr)]")}>
+      <Sidebar className={cn("overflow-hidden transition-[width] duration-300 xl:sticky xl:top-16", layoutState.isSidebarCollapsed ? "w-[72px]" : "w-full")}>
         <SidebarHeader>
-          <div className="flex items-center gap-2">
+          <div className={cn("flex items-center gap-2", layoutState.isSidebarCollapsed && "justify-center")}>
             <Filter className="h-4 w-4" aria-hidden="true" />
-            <p className="font-medium">Filters</p>
+            {!layoutState.isSidebarCollapsed ? <p className="font-medium">Filters</p> : null}
           </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={layoutState.isSidebarCollapsed ? "Expand filters" : "Collapse filters"}
+            onClick={() => setLayoutState((prev) => ({ ...prev, isSidebarCollapsed: !prev.isSidebarCollapsed }))}
+            className="hidden xl:inline-flex"
+          >
+            {layoutState.isSidebarCollapsed ? <ChevronRight className="h-4 w-4" aria-hidden="true" /> : <ChevronLeft className="h-4 w-4" aria-hidden="true" />}
+          </Button>
         </SidebarHeader>
 
         <SidebarContent>
+          {layoutState.isSidebarCollapsed ? (
+            <div className="flex flex-col items-center gap-2">
+              <Button
+                size="icon"
+                variant="outline"
+                aria-label="Expand filters"
+                onClick={() => setLayoutState((prev) => ({ ...prev, isSidebarCollapsed: false }))}
+              >
+                <ChevronRight className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            </div>
+          ) : (
+            <>
           <div className="space-y-3">
             <div className="flex items-center gap-2">
-              <Filter className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+              <Landmark className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
               <Label>Museum</Label>
             </div>
             <details className="rounded-md border">
@@ -406,7 +431,7 @@ export function AppPage() {
               <div className="grid gap-3">
                 <div className="flex items-center gap-2">
                   <Palette className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-                  <Label htmlFor="department">Genre</Label>
+                  <Label htmlFor="department" title="Genre maps your selection to museum-specific department fields.">Genre</Label>
                 </div>
                 <Select
                   id="department"
@@ -424,7 +449,7 @@ export function AppPage() {
               <div className="grid gap-3">
                 <div className="flex items-center gap-2">
                   <Palette className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-                  <Label htmlFor="medium">Medium</Label>
+                  <Label htmlFor="medium" title="Medium applies keyword matching across each museum’s own metadata fields.">Medium</Label>
                 </div>
                 <Select id="medium" value={form.medium} onChange={(event) => setForm((prev) => ({ ...prev, medium: event.target.value }))}>
                   {(options?.medium_options ?? []).map((medium) => (
@@ -438,7 +463,7 @@ export function AppPage() {
               <div className="grid gap-3">
                 <div className="flex items-center gap-2">
                   <Search className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-                  <Label htmlFor="query">Search Term</Label>
+                  <Label htmlFor="query" title="Search term matches title, artist, and museum metadata text.">Search Term</Label>
                 </div>
                 <Input id="query" value={form.query} onChange={(event) => setForm((prev) => ({ ...prev, query: event.target.value }))} />
               </div>
@@ -465,7 +490,7 @@ export function AppPage() {
               </Button>
 
               <p className="text-xs text-muted-foreground">
-                Will fetch up to {form.limit} artworks across {form.selectedSources.length || 0} museums.
+                Will fetch up to {form.limit} artworks per museum across {form.selectedSources.length || 0} museums.
               </p>
 
               <div className="flex flex-wrap gap-2">
@@ -547,6 +572,8 @@ export function AppPage() {
                   </div>
                 </details>
               ) : null}
+            </>
+          )}
         </SidebarContent>
       </Sidebar>
 

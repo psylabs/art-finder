@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import random
+import secrets
+
 import requests
 
 from . import register
@@ -56,7 +59,7 @@ class AICAdapter(MuseumAdapter):
         
         params: dict[str, str | int] = {
             "fields": fields,
-            "limit": filters.limit,
+            "limit": min(max(filters.limit * 3, filters.limit), 250),
         }
         
         # Add search query
@@ -247,10 +250,6 @@ class AICAdapter(MuseumAdapter):
                 )
                 
                 artworks.append(artwork)
-                
-                # Stop if we've reached the limit
-                if len(artworks) >= filters.limit:
-                    break
                     
             except (KeyError, TypeError, ValueError) as e:
                 self._log_warning(f"Failed to parse artwork {item.get('id')}: {e}")
@@ -269,6 +268,12 @@ class AICAdapter(MuseumAdapter):
             self._log_info(f"Filtered {resolution_filtered} artworks by resolution")
         if no_image > 0:
             self._log_info(f"Skipped {no_image} artworks without images")
+
+        # Randomize final ordering per request for better variety before truncation.
+        seed = filters.random_seed if filters.random_seed is not None else secrets.randbelow(2_147_483_647)
+        random.Random(seed ^ 0xA1C).shuffle(artworks)
+        if len(artworks) > filters.limit:
+            artworks = artworks[:filters.limit]
         
         return artworks
     

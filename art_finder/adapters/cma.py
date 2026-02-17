@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import random
+import secrets
+
 import requests
 
 from . import register
@@ -58,7 +61,7 @@ class CMAAdapter(MuseumAdapter):
         # Build API params
         params = {
             "has_image": 1,
-            "limit": filters.limit,
+            "limit": min(max(filters.limit * 3, filters.limit), 250),
         }
         dept_filter_values: set[str] | None = None
 
@@ -253,10 +256,6 @@ class CMAAdapter(MuseumAdapter):
                 )
                 
                 artworks.append(artwork)
-                
-                # Stop if we have enough
-                if len(artworks) >= filters.limit:
-                    break
                     
             except (KeyError, TypeError, ValueError) as e:
                 self._log_warning(f"Failed to parse artwork {item.get('id')}: {e}")
@@ -279,6 +278,12 @@ class CMAAdapter(MuseumAdapter):
             result.filter_status.applied["resolution"] = (
                 f"Min {filters.min_width}x{filters.min_height} (filtered {resolution_filtered})"
             )
+
+        # Randomize final ordering per request for better variety before truncation.
+        seed = filters.random_seed if filters.random_seed is not None else secrets.randbelow(2_147_483_647)
+        random.Random(seed ^ 0xC0A).shuffle(artworks)
+        if len(artworks) > filters.limit:
+            artworks = artworks[:filters.limit]
         
         return artworks
     

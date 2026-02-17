@@ -102,9 +102,6 @@ def search(filters: SearchFilters, log_callback: LogCallback | None = None) -> A
     merged.seed_used = seed
     random.Random(seed).shuffle(merged.artworks)
 
-    if len(merged.artworks) > filters.limit:
-        merged.artworks = merged.artworks[:filters.limit]
-
     if filters.random_seed is None:
         merged.filter_status.applied["random_seed"] = f"Auto-random seed: {seed}"
     else:
