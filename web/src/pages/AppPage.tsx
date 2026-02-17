@@ -81,7 +81,11 @@ function parseYearFromDate(value: string): number | null {
 }
 
 function cleanFilterDescription(description: string) {
-  return description.replace(/\s*\((?:client-side|mapped)\)\s*/g, " ").replace(/\s{2,}/g, " ").trim()
+  return description
+    .replace(/\bYear Range\b/gi, "Date Range")
+    .replace(/\s*\((?:client-side|mapped)\)\s*/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim()
 }
 
 function formatField(value: unknown) {
@@ -164,24 +168,24 @@ function DateField({
     <div className="grid gap-2">
       <Label htmlFor={id}>{label}</Label>
       <div className="relative">
-        <CalendarRange className="pointer-events-none absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden="true" />
         <Input
           id={id}
           type="date"
           value={value}
           onChange={(event) => onChange(event.target.value)}
-          className="pl-8 pr-8"
+          className="date-input pr-16"
         />
         {value ? (
           <button
             type="button"
             aria-label={`Clear ${label.toLowerCase()}`}
-            className="absolute right-2 top-2 rounded-sm p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+            className="absolute right-8 top-2 rounded-sm p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
             onClick={onClear}
           >
             <X className="h-3 w-3" aria-hidden="true" />
           </button>
         ) : null}
+        <CalendarRange className="pointer-events-none absolute right-2 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden="true" />
       </div>
     </div>
   )
@@ -198,6 +202,7 @@ export function AppPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [noticeMessage, setNoticeMessage] = useState<string | null>(null)
   const [currentIndex, setCurrentIndex] = useState(0)
+  const [showSummaryDetails, setShowSummaryDetails] = useState(false)
   const [layoutState, setLayoutState] = useState<AppLayoutState>(() => readLayoutState(DEFAULT_LAYOUT_STATE))
 
   useEffect(() => {
@@ -331,6 +336,7 @@ export function AppPage() {
       setIsSearching(true)
       setNoticeMessage(null)
       setErrorMessage(null)
+      setShowSummaryDetails(false)
       const nextResult = await searchArtworks(payload)
       setResult(nextResult)
       setDebugLogs(nextResult.logs ?? [])
@@ -488,7 +494,7 @@ export function AppPage() {
                       <CalendarRange className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
                       <p className="text-sm font-medium">Date Range</p>
                     </div>
-                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-1">
+                    <div className="grid grid-cols-1 gap-3">
                       <DateField
                         id="date-from"
                         label="From date"
@@ -563,57 +569,76 @@ export function AppPage() {
 
         {result ? (
           <Card>
-            <CardContent className="flex items-center gap-2 overflow-x-auto whitespace-nowrap pt-6">
-              <p className="text-sm font-medium">Search Summary:</p>
+            <CardContent className="pt-6">
+              <div className="w-full">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <p className="text-sm font-medium">Search Summary:</p>
 
-              {sourceCounts.length > 0
-                ? sourceCounts.map((entry) => (
-                    <Badge key={entry.source} variant="secondary">
-                      {entry.label}: {entry.count}
-                    </Badge>
-                  ))
-                : null}
+                    {sourceCounts.length > 0
+                      ? sourceCounts.map((entry) => (
+                          <Badge key={entry.source} variant="secondary" title={`${entry.count} result${entry.count === 1 ? "" : "s"} from ${entry.label}`}>
+                            {entry.label}
+                          </Badge>
+                        ))
+                      : null}
 
-              {result.warnings.length > 0 ? (
-                <Badge variant="outline" className="gap-1">
-                  <TriangleAlert className="h-3 w-3" aria-hidden="true" />
-                  {result.warnings.length} warning{result.warnings.length > 1 ? "s" : ""}
-                </Badge>
-              ) : null}
+                    {result.warnings.length > 0 ? (
+                      <Badge variant="outline" className="gap-1">
+                        <TriangleAlert className="h-3 w-3" aria-hidden="true" />
+                        {result.warnings.length} warning{result.warnings.length > 1 ? "s" : ""}
+                      </Badge>
+                    ) : null}
 
-              {result.errors.length > 0 ? (
-                <Badge variant="destructive" className="gap-1">
-                  <AlertCircle className="h-3 w-3" aria-hidden="true" />
-                  {result.errors.length} error{result.errors.length > 1 ? "s" : ""}
-                </Badge>
-              ) : null}
+                    {result.errors.length > 0 ? (
+                      <Badge variant="destructive" className="gap-1">
+                        <AlertCircle className="h-3 w-3" aria-hidden="true" />
+                        {result.errors.length} error{result.errors.length > 1 ? "s" : ""}
+                      </Badge>
+                    ) : null}
+                  </div>
 
-              <details className="ml-auto shrink-0 rounded-md border px-3 py-1 text-sm">
-                <summary className="cursor-pointer font-medium">Details</summary>
-                <div className="mt-3 space-y-3">
-                  {appliedFilters.length > 0 ? (
-                    <div>
-                      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Applied filters</p>
-                      <div className="space-y-1 text-sm">
-                        {appliedFilters.map((item) => (
-                          <p key={item.description}>{item.description + item.sourceSuffix}</p>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {Object.values(result.filter_status.skipped).length > 0 ? (
-                    <div>
-                      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Skipped filters</p>
-                      <ul className="list-disc space-y-1 pl-5 text-sm">
-                        {Object.values(result.filter_status.skipped).map((value) => (
-                          <li key={value}>{value}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    type="button"
+                    aria-expanded={showSummaryDetails}
+                    onClick={() => setShowSummaryDetails((current) => !current)}
+                  >
+                    Details
+                  </Button>
                 </div>
-              </details>
+
+                {showSummaryDetails ? (
+                  <div className="mt-3 space-y-3 rounded-md border bg-popover p-3 text-sm text-popover-foreground">
+                    {appliedFilters.length > 0 ? (
+                      <div>
+                        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Applied filters</p>
+                        <ul className="list-disc space-y-1 pl-5 text-sm">
+                          {appliedFilters.map((item) => (
+                            <li key={item.description} className="break-words">
+                              {item.description + item.sourceSuffix}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+
+                    {Object.values(result.filter_status.skipped).length > 0 ? (
+                      <div>
+                        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Skipped filters</p>
+                        <ul className="list-disc space-y-1 pl-5 text-sm">
+                          {Object.values(result.filter_status.skipped).map((value) => (
+                            <li key={value} className="break-words">
+                              {value}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
             </CardContent>
           </Card>
         ) : null}

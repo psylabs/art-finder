@@ -157,6 +157,27 @@ describe("AppPage", () => {
     })
   })
 
+  it("expands and collapses filter details in search summary", async () => {
+    mockedGetOptions.mockResolvedValue(optionsFixture)
+    mockedSearchArtworks.mockResolvedValue(makeSearchFixture())
+
+    render(<AppPage />)
+
+    await screen.findByRole("button", { name: "Load Artworks" })
+    await userEvent.click(screen.getByRole("button", { name: "Load Artworks" }))
+
+    const detailsButton = await screen.findByRole("button", { name: "Details" })
+    expect(detailsButton).toHaveAttribute("aria-expanded", "false")
+
+    await userEvent.click(detailsButton)
+    expect(detailsButton).toHaveAttribute("aria-expanded", "true")
+    expect(screen.getByText("Applied filters")).toBeInTheDocument()
+
+    await userEvent.click(detailsButton)
+    expect(detailsButton).toHaveAttribute("aria-expanded", "false")
+    expect(screen.queryByText("Applied filters")).not.toBeInTheDocument()
+  })
+
   it("restores persisted session state on mount", async () => {
     mockedGetOptions.mockResolvedValue(optionsFixture)
 

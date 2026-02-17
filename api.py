@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 import requests
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from art_finder.adapters import get_adapter_names
@@ -25,6 +27,8 @@ DEFAULT_FETCH_LIMIT = 50
 FETCH_LIMIT_OPTIONS = [50, 100, 200, 500, 1000]
 ALL_GENRES_LABEL = "All genres"
 ALL_MEDIA_LABEL = "All media"
+WEB_DIST_DIR = (Path(__file__).resolve().parent / "web" / "dist").resolve()
+WEB_ASSETS_DIR = WEB_DIST_DIR / "assets"
 
 app = FastAPI(title="Art Findr API", version="0.1.0")
 
@@ -38,6 +42,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+if WEB_ASSETS_DIR.exists():
+    app.mount("/assets", StaticFiles(directory=WEB_ASSETS_DIR), name="assets")
 
 
 class SearchRequest(BaseModel):
@@ -220,6 +227,24 @@ def serve() -> None:
     import uvicorn
 
     uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True)
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+def spa(full_path: str) -> FileResponse:
+    """Serve the built React app when deployed as a single container."""
+    if full_path.startswith("api"):
+        raise HTTPException(status_code=404, detail="Not found")
+
+    if not WEB_DIST_DIR.exists():
+        raise HTTPException(status_code=404, detail="Frontend assets are not built.")
+
+    # Serve static files directly when they exist, otherwise hand off to index.html.
+    if full_path:
+        candidate = (WEB_DIST_DIR / full_path).resolve()
+        if candidate.is_file() and WEB_DIST_DIR in candidate.parents:
+            return FileResponse(candidate)
+
+    return FileResponse(WEB_DIST_DIR / "index.html")
 
 
 if __name__ == "__main__":

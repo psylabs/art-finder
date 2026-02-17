@@ -1,6 +1,6 @@
 # Open Access Art Finder
 
-Art Findr is migrating from Streamlit to a React frontend backed by a Python API.
+Art Findr is a React frontend backed by a FastAPI backend for exploring and downloading open-access artworks across major museums.
 
 ## Features
 
@@ -15,22 +15,7 @@ Art Findr is migrating from Streamlit to a React frontend backed by a Python API
 - **Graceful error handling**: Filter feedback shows what worked vs. what was skipped
 - **Human-readable filenames**: Downloads include museum code and artwork title
 
-## Quick Start (Legacy Streamlit)
-
-```bash
-# Install uv if you haven't already
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Sync dependencies
-uv sync
-
-# Run the app
-uv run streamlit run app.py
-```
-
-The legacy app opens at `http://localhost:8501`.
-
-## Quick Start (React + FastAPI Migration)
+## Quick Start (React + FastAPI)
 
 ```bash
 # Install backend deps
@@ -77,15 +62,13 @@ art_finder/
   mappings/           # Cross-museum field/genre/medium mappings
   models.py           # Artwork, SearchFilters, AdapterResult
   services/           # Aggregation/search orchestration
-app.py                # Streamlit UI (legacy)
 api.py                # FastAPI backend for React app
 web/                  # React + Tailwind + shadcn-style frontend
 ```
 
-## Migration Status
+## API Endpoints
 
-- Streamlit app remains available in `app.py`.
-- FastAPI migration endpoints:
+- FastAPI endpoints:
   - `GET /api/options`
   - `POST /api/search`
   - `GET /api/download`

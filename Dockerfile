@@ -1,29 +1,26 @@
-FROM python:3.11-slim
+FROM node:22-alpine AS web-builder
+WORKDIR /build/web
 
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+
+COPY web/ ./
+RUN npm run build
+
+
+FROM python:3.11-slim AS runtime
 WORKDIR /app
 
-# Install uv for fast dependency management
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# Copy dependency files
 COPY pyproject.toml uv.lock ./
-
-# Install dependencies
 RUN uv sync --frozen --no-dev
 
-# Copy application code
-COPY app.py ./
+COPY api.py ./
 COPY art_finder/ ./art_finder/
+COPY --from=web-builder /build/web/dist ./web/dist
 
-# Expose Streamlit port
+ENV PORT=8080
 EXPOSE 8080
 
-# Cloud Run sets PORT env var, Streamlit needs to listen on it
-ENV PORT=8080
-
-# Run Streamlit
-CMD uv run streamlit run app.py \
-    --server.port=$PORT \
-    --server.address=0.0.0.0 \
-    --server.headless=true \
-    --browser.gatherUsageStats=false
+CMD ["sh", "-c", "uv run uvicorn api:app --host 0.0.0.0 --port ${PORT:-8080}"]

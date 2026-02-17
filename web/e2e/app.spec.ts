@@ -130,6 +130,19 @@ test("app keeps CTA visible, renders image/actions, and preserves state across H
   await expect(actions.getByRole("button", { name: "Skip" })).toBeVisible()
   await expect(actions.getByRole("button", { name: "Download" })).toBeVisible()
 
+  const detailsButton = page.getByRole("button", { name: "Details" })
+  await expect(detailsButton).toHaveAttribute("aria-expanded", "false")
+  await detailsButton.click()
+  await expect(detailsButton).toHaveAttribute("aria-expanded", "true")
+  const detailsPanel = page.getByText("Applied filters")
+  await expect(detailsPanel).toBeVisible()
+  const panelBox = await detailsPanel.boundingBox()
+  expect(panelBox).not.toBeNull()
+  if (panelBox) {
+    expect(panelBox.x).toBeGreaterThanOrEqual(0)
+    expect(panelBox.x + panelBox.width).toBeLessThanOrEqual(page.viewportSize()!.width)
+  }
+
   await expect(page.getByText(/^Museums:/)).toHaveCount(0)
 
   await page.getByRole("link", { name: "Help" }).click()
