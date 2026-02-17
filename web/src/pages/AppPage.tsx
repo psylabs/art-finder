@@ -101,6 +101,13 @@ function formatField(value: unknown) {
   return String(value)
 }
 
+function summarizeMessages(messages: string[], fallback: string) {
+  if (messages.length === 0) {
+    return fallback
+  }
+  return messages.map((message, index) => `${index + 1}. ${message}`).join("\n")
+}
+
 function createDefaultForm(options: AppOptions): AppFormState {
   return {
     selectedSources: options.defaults.sources,
@@ -310,6 +317,14 @@ export function AppPage() {
       count,
     }))
   }, [options, result])
+  const warningTooltip = useMemo(
+    () => summarizeMessages(result?.warnings ?? [], "No warnings."),
+    [result?.warnings],
+  )
+  const errorTooltip = useMemo(
+    () => summarizeMessages(result?.errors ?? [], "No errors."),
+    [result?.errors],
+  )
 
   async function handleLoad() {
     if (!options) {
@@ -431,7 +446,10 @@ export function AppPage() {
               <div className="grid gap-3">
                 <div className="flex items-center gap-2">
                   <Palette className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-                  <Label htmlFor="department" title="Genre maps your selection to museum-specific department fields.">Genre</Label>
+                  <Label htmlFor="department">Genre</Label>
+                  <span title="Genre maps your selection to museum-specific department fields." className="inline-flex text-muted-foreground">
+                    <Info className="h-3.5 w-3.5" aria-label="Genre filter help" />
+                  </span>
                 </div>
                 <Select
                   id="department"
@@ -449,7 +467,10 @@ export function AppPage() {
               <div className="grid gap-3">
                 <div className="flex items-center gap-2">
                   <Palette className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-                  <Label htmlFor="medium" title="Medium applies keyword matching across each museum’s own metadata fields.">Medium</Label>
+                  <Label htmlFor="medium">Medium</Label>
+                  <span title="Medium uses keyword matching across each museum’s own metadata fields." className="inline-flex text-muted-foreground">
+                    <Info className="h-3.5 w-3.5" aria-label="Medium filter help" />
+                  </span>
                 </div>
                 <Select id="medium" value={form.medium} onChange={(event) => setForm((prev) => ({ ...prev, medium: event.target.value }))}>
                   {(options?.medium_options ?? []).map((medium) => (
@@ -463,7 +484,10 @@ export function AppPage() {
               <div className="grid gap-3">
                 <div className="flex items-center gap-2">
                   <Search className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-                  <Label htmlFor="query" title="Search term matches title, artist, and museum metadata text.">Search Term</Label>
+                  <Label htmlFor="query">Search Term</Label>
+                  <span title="Search term matches title, artist, and museum metadata text fields." className="inline-flex text-muted-foreground">
+                    <Info className="h-3.5 w-3.5" aria-label="Search term help" />
+                  </span>
                 </div>
                 <Input id="query" value={form.query} onChange={(event) => setForm((prev) => ({ ...prev, query: event.target.value }))} />
               </div>
@@ -604,21 +628,21 @@ export function AppPage() {
 
                     {sourceCounts.length > 0
                       ? sourceCounts.map((entry) => (
-                          <Badge key={entry.source} variant="secondary" title={`${entry.count} result${entry.count === 1 ? "" : "s"} from ${entry.label}`}>
-                            {entry.label}
+                          <Badge key={entry.source} variant="secondary">
+                            {entry.label}: {entry.count}
                           </Badge>
                         ))
                       : null}
 
                     {result.warnings.length > 0 ? (
-                      <Badge variant="outline" className="gap-1">
+                      <Badge variant="outline" className="gap-1" title={warningTooltip}>
                         <TriangleAlert className="h-3 w-3" aria-hidden="true" />
                         {result.warnings.length} warning{result.warnings.length > 1 ? "s" : ""}
                       </Badge>
                     ) : null}
 
                     {result.errors.length > 0 ? (
-                      <Badge variant="destructive" className="gap-1">
+                      <Badge variant="destructive" className="gap-1" title={errorTooltip}>
                         <AlertCircle className="h-3 w-3" aria-hidden="true" />
                         {result.errors.length} error{result.errors.length > 1 ? "s" : ""}
                       </Badge>
