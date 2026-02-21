@@ -782,7 +782,6 @@ function ArtworkPanel({
     ["Type", artwork.classification],
     ["Department", artwork.department],
     ["Medium", artwork.medium],
-    ["Credit", artwork.credit],
     ["Culture", artwork.culture],
     ["Rights", artwork.rights_label],
   ].filter(([, value]) => Boolean(formatField(value)))
@@ -836,7 +835,7 @@ function ArtworkPanel({
         </div>
       </CardHeader>
 
-      <CardContent className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_330px]">
+      <CardContent className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
         <div className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2" data-testid="artwork-actions">
             <p className="text-xs text-muted-foreground">
@@ -860,7 +859,7 @@ function ArtworkPanel({
             </div>
           </div>
 
-          <div className="relative h-[min(56vh,560px)] min-h-[300px] overflow-hidden rounded-lg border bg-muted/10">
+          <div className="relative h-[min(78vh,820px)] min-h-[480px] overflow-hidden rounded-lg border bg-muted/10">
             {imageStatus === "loading" ? <div className="absolute inset-0 animate-pulse bg-muted/30" aria-hidden="true" /> : null}
 
             <img
